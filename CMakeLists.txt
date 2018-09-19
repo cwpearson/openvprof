@@ -24,6 +24,8 @@ include(GitGetRevisionDescription)
 
 hunter_add_package(fmt)
 hunter_add_package(spdlog)
+find_package(fmt CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 find_package(CUDA REQUIRED)
 
 
@@ -41,10 +43,10 @@ if(CUDA_MULTI_ARCH)
   CUDA_SELECT_NVCC_ARCH_FLAGS(CUDA_ARCH_FLAGS All)
 else()
   if (DEFINED NVCC_ARCH_FLAGS)
-    scope_status("Manual cuda arch flags...")
+    message(STATUS "Manual cuda arch flags...")
     CUDA_SELECT_NVCC_ARCH_FLAGS(CUDA_ARCH_FLAGS ${NVCC_ARCH_FLAGS})
   else()
-    scope_status("Automatic cuda arch flags...")
+    message(STATUS "Automatic cuda arch flags...")
     CUDA_SELECT_NVCC_ARCH_FLAGS(CUDA_ARCH_FLAGS Auto)
   endif()
 endif()
@@ -63,14 +65,18 @@ set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
 set(CUDA_VERBOSE_BUILD OFF)
 
 
-add_library(openvprof ${CPP_SOURCES} ${CUDA_SOURCES})
+set(CPP_SOURCES src/profiler.cpp src/logger.cpp)
+add_library(openvprof SHARED ${CPP_SOURCES} ${CUDA_SOURCES})
 
 # Add include directories
-target_include_directories(openvprof PRIVATE
-  third_party/
-  include/
-  ${PROJECT_BINARY_DIR}/include
-  ${CUDA_INCLUDE_DIRECTORIES}
+target_include_directories(openvprof
+  PRIVATE include/
+  PRIVATE ${PROJECT_BINARY_DIR}/include
+)
+target_include_directories(openvprof SYSTEM
+  PRIVATE third_party/
+  PRIVATE ${CUDA_INCLUDE_DIRS}
+  PRIVATE ${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/include
 )
 
 target_compile_definitions(openvprof PUBLIC -DPROJECT_NAME=openvprof)
@@ -91,17 +97,16 @@ target_compile_features(openvprof PUBLIC cxx_std_11)
 
 git_get_head_revision(GIT_REFSPEC GIT_HASH)
 git_local_changes(GIT_LOCAL_CHANGES)
-scope_status(GIT_REFSPEC=${GIT_REFSPEC})
-scope_status(GIT_HASH=${GIT_HASH})
-scope_status(GIT_LOCAL_CHANGES=${GIT_LOCAL_CHANGES})
+message(STATUS GIT_REFSPEC=${GIT_REFSPEC})
+message(STATUS GIT_HASH=${GIT_HASH})
+message(STATUS GIT_LOCAL_CHANGES=${GIT_LOCAL_CHANGES})
 
 # Convert CUDA flags from list
-scope_status("CMAKE_CUDA_FLAGS: ${CMAKE_CUDA_FLAGS}")
+message(STATUS "CMAKE_CUDA_FLAGS: ${CMAKE_CUDA_FLAGS}")
 string(REPLACE ";" " " CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}")
-scope_status("CMAKE_CUDA_FLAGS: ${CMAKE_CUDA_FLAGS}")
+message(STATUS "CMAKE_CUDA_FLAGS: ${CMAKE_CUDA_FLAGS}")
 
 # Generate version file
-scope_status("${PROJECT_SOURCE_DIR}/.../config.hpp.in -> ${PROJECT_BINARY_DIR}/.../config.hpp")
 configure_file (
     "${PROJECT_SOURCE_DIR}/include/openvprof/config.hpp.in"
     "${PROJECT_BINARY_DIR}/include/openvprof/config.hpp"
