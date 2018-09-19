@@ -24,6 +24,8 @@ include(GitGetRevisionDescription)
 
 hunter_add_package(fmt)
 hunter_add_package(spdlog)
+hunter_add_package(Boost COMPONENTS system)
+find_package(Boost CONFIG REQUIRED COMPONENTS system)
 find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(CUDA REQUIRED)
@@ -66,7 +68,7 @@ set(CUDA_VERBOSE_BUILD OFF)
 
 
 set(CPP_SOURCES src/profiler.cpp src/logger.cpp)
-add_library(openvprof SHARED ${CPP_SOURCES} ${CUDA_SOURCES})
+add_executable(openvprof ${CPP_SOURCES} ${CUDA_SOURCES})
 
 # Add include directories
 target_include_directories(openvprof
@@ -77,6 +79,7 @@ target_include_directories(openvprof SYSTEM
   PRIVATE third_party/
   PRIVATE ${CUDA_INCLUDE_DIRS}
   PRIVATE ${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/include
+  PRIVATE ${Boost_INCLUDE_DIRS}
 )
 
 target_compile_definitions(openvprof PUBLIC -DPROJECT_NAME=openvprof)
@@ -89,6 +92,7 @@ set_target_properties(openvprof PROPERTIES
 target_link_libraries(openvprof fmt::fmt)
 target_link_libraries(openvprof spdlog::spdlog)
 target_link_libraries(openvprof ${CUDA_LIBRARIES})
+target_link_libraries(openvprof Boost::boost Boost::system)
 
 # Request that scope be built with -std=c++11
 # As this is a public compile feature anything that links to
