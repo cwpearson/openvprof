@@ -75,6 +75,8 @@ set(CPP_SOURCES
   src/profiler.cpp
   src/logger.cpp
   src/cupti_activity.cpp
+  src/nvml.cpp
+  src/record.cpp
 )
 
 add_library(openvprof SHARED ${CPP_SOURCES} ${CUDA_SOURCES})
@@ -91,20 +93,22 @@ target_include_directories(openvprof SYSTEM
   PRIVATE ${Boost_INCLUDE_DIRS}
 )
 
-target_compile_definitions(openvprof PUBLIC -DPROJECT_NAME=openvprof)
 
-set_target_properties(openvprof PROPERTIES
-	# CUDA_SEPARABLE_COMPILATION ON
-	CUDA_RESOLVE_DEVICE_SYMBOLS ON
-)
 
 # target_link_libraries(openvprof fmt::fmt)
 target_link_libraries(openvprof spdlog::spdlog)
 target_link_libraries(openvprof ${CUDA_LIBRARIES})
 target_link_libraries(openvprof Boost::boost Boost::system)
 target_link_libraries(openvprof -L${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64 cupti)
+target_link_libraries(openvprof nvidia-ml)
 
 add_executable(vec examples/samples/vectorAdd/vectorAdd.cu)
+
+target_compile_definitions(openvprof PUBLIC -DPROJECT_NAME=openvprof)
+set_target_properties(openvprof PROPERTIES
+	# CUDA_SEPARABLE_COMPILATION ON
+	CUDA_RESOLVE_DEVICE_SYMBOLS ON
+)
 
 # Request that scope be built with -std=c++11
 # As this is a public compile feature anything that links to
