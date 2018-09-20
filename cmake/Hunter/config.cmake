@@ -15,3 +15,9 @@ hunter_config(
     VERSION 1.67.0-p1
     CMAKE_ARGS BUILD_SHARED_LIBS=ON
 )
+
+hunter_config(
+    nlohmann_json 
+    VERSION 3.1.2
+    CMAKE_ARGS BUILD_SHARED_LIBS=ON
+)

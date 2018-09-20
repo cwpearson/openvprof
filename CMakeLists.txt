@@ -27,9 +27,11 @@ include(GitGetRevisionDescription)
 
 hunter_add_package(spdlog)
 hunter_add_package(Boost COMPONENTS system)
-find_package(Boost CONFIG REQUIRED COMPONENTS system)
-# find_package(fmt CONFIG REQUIRED)
-find_package(spdlog CONFIG REQUIRED)
+hunter_add_package(nlohmann_json)
+find_package(nlohmann_json REQUIRED CONFIG)
+find_package(Boost REQUIRED COMPONENTS system CONFIG)
+find_package(fmt REQUIRED CONFIG)
+find_package(spdlog CONFIG REQUIRED CONFIG)
 find_package(CUDA REQUIRED)
 
 
