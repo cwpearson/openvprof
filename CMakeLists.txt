@@ -57,6 +57,8 @@ else()
   endif()
 endif()
 
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wshadow -Wpedantic")
+
 LIST(APPEND CMAKE_CUDA_FLAGS ${CUDA_ARCH_FLAGS}
 					         -Wno-deprecated-gpu-targets
 					         -lineinfo
@@ -101,6 +103,7 @@ target_link_libraries(openvprof ${CUDA_LIBRARIES})
 target_link_libraries(openvprof Boost::boost Boost::system)
 target_link_libraries(openvprof -L${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64 cupti)
 target_link_libraries(openvprof nvidia-ml)
+target_link_libraries(openvprof "-Wl,--no-undefined")
 
 add_executable(vec examples/samples/vectorAdd/vectorAdd.cu)
 

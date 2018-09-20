@@ -16,6 +16,12 @@ class NvmlCudaDriverVersionRecord : public Record {
   nlohmann::json to_json() const override;
 };
 
+class NvmlPstateRecord : public Record {
+ public:
+  int pstate_;
+  nlohmann::json to_json() const override;
+};
+
 // convert any record to json implicitly
 static void to_json(nlohmann::json &j, const Record &r) {
     j = r.to_json();

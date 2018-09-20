@@ -34,6 +34,7 @@ void record_writer(queue<Record*> &records) {
   Record *record;
   while (records.pop(record)) {
     json j = *record;
+    delete record;
     LOG(trace, j.dump());
   }
 }
