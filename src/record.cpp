@@ -5,7 +5,7 @@ using nlohmann::json;
 namespace openvprof {
 
 
-json NvmlCudaDriverVersionRecord::to_json() const{
+json NvmlCudaDriverVersionRecord::to_json() const {
     return json{{"cuda_driver_version", version}};
 }
 
