@@ -10,9 +10,10 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
   HunterGate(
       URL "https://github.com/ruslo/hunter/archive/v0.23.1.tar.gz"
       SHA1 "51d2d6be411251c8de18c4ca20ef778880cf4cce"
+      LOCAL 
   )
 
-project(scope LANGUAGES C CXX CUDA VERSION 0.3.0)
+project(openvprof LANGUAGES C CXX CUDA VERSION 0.3.0)
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/modules ${CMAKE_MODULE_PATH})
 
@@ -21,12 +22,13 @@ include(CTest)
 include(GitGetRevisionDescription)
 
 
+# set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
+# hunter_add_package(fmt)
 
-hunter_add_package(fmt)
 hunter_add_package(spdlog)
 hunter_add_package(Boost COMPONENTS system)
 find_package(Boost CONFIG REQUIRED COMPONENTS system)
-find_package(fmt CONFIG REQUIRED)
+# find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(CUDA REQUIRED)
 
@@ -67,8 +69,13 @@ set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
 set(CUDA_VERBOSE_BUILD OFF)
 
 
-set(CPP_SOURCES src/profiler.cpp src/logger.cpp)
-add_executable(openvprof ${CPP_SOURCES} ${CUDA_SOURCES})
+set(CPP_SOURCES
+  src/profiler.cpp
+  src/logger.cpp
+  src/cupti_activity.cpp
+)
+
+add_library(openvprof SHARED ${CPP_SOURCES} ${CUDA_SOURCES})
 
 # Add include directories
 target_include_directories(openvprof
@@ -89,10 +96,13 @@ set_target_properties(openvprof PROPERTIES
 	CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
 
-target_link_libraries(openvprof fmt::fmt)
+# target_link_libraries(openvprof fmt::fmt)
 target_link_libraries(openvprof spdlog::spdlog)
 target_link_libraries(openvprof ${CUDA_LIBRARIES})
 target_link_libraries(openvprof Boost::boost Boost::system)
+target_link_libraries(openvprof -L${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64 cupti)
+
+add_executable(vec examples/samples/vectorAdd/vectorAdd.cu)
 
 # Request that scope be built with -std=c++11
 # As this is a public compile feature anything that links to

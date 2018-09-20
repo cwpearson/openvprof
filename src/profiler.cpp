@@ -6,6 +6,7 @@
 
 #include "openvprof/logger.hpp"
 #include "openvprof/record.hpp"
+#include "openvprof/cupti_activity.hpp"
 
 #include <boost/lockfree/queue.hpp>
 #include <boost/process/system.hpp>
@@ -33,12 +34,13 @@ void nvml_poll() {
   }
 }
 
-void record_writer() {
-  while(true) {
-  logger::console->info("writing record...");
-  break;
+void record_writer(queue<Record*> &records) {
+  Record *record;
+  while (records.pop(record)) {
+    logger::console->info("dumped record");
   }
 }
+
 
 Profiler::Profiler() : records_(128)  {
   std::cerr << "hello from std::cerr\n";
@@ -46,14 +48,19 @@ Profiler::Profiler() : records_(128)  {
   if (!logger::console || logger::console->name() != "openvprof") {
     logger::console  = spdlog::stderr_logger_mt("openvprof");
   }
-  logger::console->info("Hello from the logger");
+  LOG(info, "Hello from the logger");
+
+  openvprof::initTrace();
 
   nvml_poller_ = std::thread(nvml_poll);
-  record_writer_ = std::thread(record_writer);
+  record_writer_ = std::thread(record_writer, std::ref(records_));
 }
 
 Profiler::~Profiler() {
   logger::console->info("finalizing profiler.");
+
+  LOG(info, "finalizing CUPTI activity API");
+  openvprof::finalizeTrace();
 
   logger::console->info("stopping nvml poller...");
   nvml_poll_stop = true;
@@ -64,9 +71,9 @@ Profiler::~Profiler() {
   logger::console->flush();
 }
 
+static Profiler global;
 
 int main(int argc, char **argv) {
-  Profiler p;
 
   namespace bp = boost::process; //we will assume this for all further examples
 
@@ -76,7 +83,10 @@ int main(int argc, char **argv) {
       cmd += std::string(argv[i]) + " ";
     }
     logger::console->info("Running {}", cmd);
-    int result = bp::system(cmd);
+    auto c = bp::child(cmd);
+    c.wait();
+    int ret = c.exit_code();
+
   }
 
   return 0;

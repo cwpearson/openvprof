@@ -3,17 +3,18 @@
 #include <cstdlib>
 #include <ostream>
 #include <string>
+#include <iostream>
 
 #include <cupti.h>
 
-#define CUPTI_CHECK(ans, err)                                                  \
-  { cuptiAssert((ans), __FILE__, __LINE__, (err)); }
+#define CUPTI_CHECK(ans)                                                  \
+  { cuptiAssert((ans), __FILE__, __LINE__); }
 inline void cuptiAssert(CUptiResult code, const char *file, int line,
-                        std::ostream &err, bool abort = true) {
+                        bool abort = true) {
   if (code != CUPTI_SUCCESS) {
     const char *errstr;
     cuptiGetResultString(code, &errstr);
-    err << "CUPTI_CHECK: " << errstr << " " << file << " " << line << std::endl;
+    std::cerr << "CUPTI_CHECK: " << errstr << " " << file << " " << line << std::endl;
     if (abort)
       exit(code);
   }
