@@ -104,6 +104,7 @@ target_link_libraries(openvprof ${CUDA_LIBRARIES})
 target_link_libraries(openvprof Boost::boost Boost::system)
 target_link_libraries(openvprof -L${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64 cupti)
 target_link_libraries(openvprof nvidia-ml)
+target_link_libraries(openvprof cuda)
 target_link_libraries(openvprof "-Wl,--no-undefined")
 
 add_executable(vec examples/samples/vectorAdd/vectorAdd.cu)

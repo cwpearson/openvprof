@@ -1,11 +1,18 @@
-#include <cupti_activity.h>
 #include <cstdio>
 #include <cstdlib>
+
+#include <cupti_activity.h>
+#include <boost/lockfree/queue.hpp>
 
 #include "openvprof/cupti_activity.hpp"
 #include "openvprof/cupti_utils.hpp"
 #include "openvprof/logger.hpp"
 #include "openvprof/record.hpp"
+
+using boost::lockfree::queue;
+using openvprof::Record;
+
+static queue<Record*> *records_;
 
 #define BUF_SIZE (32 * 1024)
 #define ALIGN_SIZE (8)
@@ -15,6 +22,21 @@
 // Timestamp at trace initialization time. Used to normalized other
 // timestamps
 static uint64_t startTimestamp;
+
+static const char *
+getUvmCounterKindString(CUpti_ActivityUnifiedMemoryCounterKind kind)
+{
+    switch (kind) 
+    {
+    case CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_BYTES_TRANSFER_HTOD:
+        return "BYTES_TRANSFER_HTOD";
+    case CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_BYTES_TRANSFER_DTOH:
+        return "BYTES_TRANSFER_DTOH";
+    default:
+        break;
+    }
+    return "<unknown>";
+}
 
 static const char *
 getMemcpyKindString(CUpti_ActivityMemcpyKind kind)
@@ -38,6 +60,31 @@ getMemcpyKindString(CUpti_ActivityMemcpyKind kind)
     return "DtoD";
   case CUPTI_ACTIVITY_MEMCPY_KIND_HTOH:
     return "HtoH";
+  default:
+    break;
+  }
+
+  return "<unknown>";
+}
+
+static const char *
+getMemoryKindString(CUpti_ActivityMemoryKind kind)
+{
+  switch (kind) {
+  case CUPTI_ACTIVITY_MEMORY_KIND_PAGEABLE:
+    return "pageable";
+  case CUPTI_ACTIVITY_MEMORY_KIND_PINNED:
+    return "pinned";
+  case CUPTI_ACTIVITY_MEMORY_KIND_DEVICE:
+    return "device";
+  case CUPTI_ACTIVITY_MEMORY_KIND_ARRAY:
+    return "array";
+  case CUPTI_ACTIVITY_MEMORY_KIND_MANAGED:
+    return "managed";
+  case CUPTI_ACTIVITY_MEMORY_KIND_DEVICE_STATIC:
+    return "device-static";
+  case CUPTI_ACTIVITY_MEMORY_KIND_MANAGED_STATIC:
+    return "managed-static";
   default:
     break;
   }
@@ -164,6 +211,18 @@ printActivity(CUpti_Activity *record)
              (unsigned long long) (memcpy->end - startTimestamp),
              memcpy->deviceId, memcpy->contextId, memcpy->streamId,
              memcpy->correlationId, memcpy->runtimeCorrelationId);
+
+      const char *copy_kind = getMemcpyKindString((CUpti_ActivityMemcpyKind) memcpy->copyKind);
+      const char *src_kind = getMemoryKindString((CUpti_ActivityMemoryKind) memcpy->srcKind);
+      const char *dst_kind = getMemoryKindString((CUpti_ActivityMemoryKind) memcpy->dstKind);
+      auto *r = new openvprof::CuptiActivityMemcpyRecord(
+        memcpy->start,
+         memcpy->end,
+          memcpy->correlationId,
+           copy_kind,
+        src_kind,
+        dst_kind);
+      records_->push(r);
       break;
     }
   case CUPTI_ACTIVITY_KIND_MEMSET:
@@ -194,7 +253,8 @@ printActivity(CUpti_Activity *record)
              kernel->blockX, kernel->blockY, kernel->blockZ,
              kernel->staticSharedMemory, kernel->dynamicSharedMemory);
 
-      openvprof::CuptiActivityKernelRecord r;
+      auto *r = new openvprof::CuptiActivityKernelRecord(kernel->start, kernel->end, kernel->correlationId);
+      records_->push(r);
       break;
     }
   case CUPTI_ACTIVITY_KIND_DRIVER:
@@ -228,31 +288,42 @@ printActivity(CUpti_Activity *record)
              getActivityObjectKindId(overhead->objectKind, &overhead->objectId));
       break;
     }
+  case CUPTI_ACTIVITY_KIND_UNIFIED_MEMORY_COUNTER:
+        {
+            CUpti_ActivityUnifiedMemoryCounter2 *uvm = (CUpti_ActivityUnifiedMemoryCounter2 *)record;
+            printf("UNIFIED_MEMORY_COUNTER [ %llu %llu ] kind=%s value=%llu src %u dst %u\n",
+                (unsigned long long)(uvm->start),
+                (unsigned long long)(uvm->end),
+                getUvmCounterKindString(uvm->counterKind),
+                (unsigned long long)uvm->value,
+                uvm->srcId,
+                uvm->dstId);
+            break;
+        }
   default:
-    printf("  <unknown>\n");
+    LOG(warn, "unknown CUPTI_ACTIVITY_KIND {}", record->kind);
     break;
   }
 }
 
 void CUPTIAPI bufferRequested(uint8_t **buffer, size_t *size, size_t *maxNumRecords)
 {
-    LOG(info, "CUPTI activity API requested a buffer");
-//   uint8_t *bfr = (uint8_t *) malloc(BUF_SIZE + ALIGN_SIZE);
+    LOG(trace, "CUPTI activity API requested a buffer");
   uint8_t *bfr = static_cast<uint8_t *>(aligned_alloc(ALIGN_SIZE, BUF_SIZE));
   if (bfr == NULL) {
-    printf("Error: out of memory\n");
+    LOG(error, "Error: out of memory\n");
     exit(-1);
   }
 
   *size = BUF_SIZE;
-//   *buffer = ALIGN_BUFFER(bfr, ALIGN_SIZE);
   *buffer = bfr;
   *maxNumRecords = 0;
 }
 
 void CUPTIAPI bufferCompleted(CUcontext ctx, uint32_t streamId, uint8_t *buffer, size_t size, size_t validSize)
 {
-  LOG(info, "CUPTI activity API completed a buffer");
+  (void)size;
+  LOG(trace, "CUPTI activity API completed a buffer");
   CUptiResult status;
   CUpti_Activity *record = NULL;
 
@@ -273,7 +344,7 @@ void CUPTIAPI bufferCompleted(CUcontext ctx, uint32_t streamId, uint8_t *buffer,
     size_t dropped;
     CUPTI_CHECK(cuptiActivityGetNumDroppedRecords(ctx, streamId, &dropped));
     if (dropped != 0) {
-      printf("Dropped %u activity records\n", (unsigned int) dropped);
+      LOG(warn, "Dropped {} activity records\n", dropped);
     }
   }
 
@@ -281,8 +352,10 @@ void CUPTIAPI bufferCompleted(CUcontext ctx, uint32_t streamId, uint8_t *buffer,
 }
 
 void
-openvprof::initTrace()
+openvprof::initTrace(queue<Record*> *records)
 {
+  records_ = records;
+
   size_t attrValue = 0, attrValueSize = sizeof(size_t);
   // Device activity record is created when CUDA initializes, so we
   // want to enable it before cuInit() or any CUDA runtime call.
@@ -300,9 +373,43 @@ openvprof::initTrace()
   CUPTI_CHECK(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_KERNEL));
   CUPTI_CHECK(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_OVERHEAD));
 
+  
+// enable unified memory,
+// FIXME: why is cuInit() needed before this,
+// FIXME: unified_memory example has this after callbacks.
+cuInit(0);
+CUpti_ActivityUnifiedMemoryCounterConfig config[2];
+    // configure unified memory counters
+    config[0].scope = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_SCOPE_PROCESS_SINGLE_DEVICE;
+    config[0].kind = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_BYTES_TRANSFER_HTOD;
+    config[0].deviceId = 0;
+    config[0].enable = 1;
+
+    config[1].scope = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_SCOPE_PROCESS_SINGLE_DEVICE;
+    config[1].kind = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_BYTES_TRANSFER_DTOH;
+    config[1].deviceId = 0;
+    config[1].enable = 1;
+
+    CUptiResult res = cuptiActivityConfigureUnifiedMemoryCounter(config, 2);
+    if (res == CUPTI_ERROR_UM_PROFILING_NOT_SUPPORTED) {
+        LOG(warn, "Unified memory is not supported on the underlying platform.\n");
+    }
+    else if (res == CUPTI_ERROR_UM_PROFILING_NOT_SUPPORTED_ON_DEVICE) {
+        LOG(warn, "Unified memory is not supported on the device.\n");
+    }
+    else if (res == CUPTI_ERROR_UM_PROFILING_NOT_SUPPORTED_ON_NON_P2P_DEVICES) {
+        LOG(warn, "Unified memory is not supported on the non-P2P multi-gpu setup.\n");
+    }
+    else {
+        CUPTI_CHECK(res);
+    }
+  CUPTI_CHECK(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_UNIFIED_MEMORY_COUNTER));
+
+
   // Register callbacks for buffer requests and for buffers completed by CUPTI.
   LOG(info, "cuptiActivityRegisterCallbacks...");
   CUPTI_CHECK(cuptiActivityRegisterCallbacks(bufferRequested, bufferCompleted));
+
 
   // Get and set activity attributes.
   // Attributes can be set by the CUPTI client to change behavior of the activity API.
@@ -319,6 +426,10 @@ openvprof::initTrace()
   CUPTI_CHECK(cuptiActivitySetAttribute(CUPTI_ACTIVITY_ATTR_DEVICE_BUFFER_POOL_LIMIT, &attrValueSize, &attrValue));
 
   CUPTI_CHECK(cuptiGetTimestamp(&startTimestamp));
+
+
+
+
 }
 
 void

@@ -18,7 +18,7 @@ void RecordWriter::run() {
             delete r;
             r = nullptr;
             LOG(trace, "write {}", j.dump());
-            file << j << "\n";
+            file << j << ",\n";
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
 

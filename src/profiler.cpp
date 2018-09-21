@@ -57,7 +57,7 @@ Profiler::Profiler() : records_(128), nvml_poller_(&records_)  {
   record_writer_.start();
 
   // init CUPTI activity API
-  openvprof::initTrace();
+  openvprof::initTrace(&records_);
 
   // init nvml
   openvprof::nvml::init();
