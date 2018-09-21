@@ -79,6 +79,7 @@ set(CPP_SOURCES
   src/cupti_activity.cpp
   src/nvml.cpp
   src/record.cpp
+  src/record_writer.cpp
 )
 
 add_library(openvprof SHARED ${CPP_SOURCES} ${CUDA_SOURCES})

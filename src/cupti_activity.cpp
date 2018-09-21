@@ -5,6 +5,7 @@
 #include "openvprof/cupti_activity.hpp"
 #include "openvprof/cupti_utils.hpp"
 #include "openvprof/logger.hpp"
+#include "openvprof/record.hpp"
 
 #define BUF_SIZE (32 * 1024)
 #define ALIGN_SIZE (8)
@@ -192,6 +193,8 @@ printActivity(CUpti_Activity *record)
              kernel->gridX, kernel->gridY, kernel->gridZ,
              kernel->blockX, kernel->blockY, kernel->blockZ,
              kernel->staticSharedMemory, kernel->dynamicSharedMemory);
+
+      openvprof::CuptiActivityKernelRecord r;
       break;
     }
   case CUPTI_ACTIVITY_KIND_DRIVER:

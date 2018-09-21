@@ -1,11 +1,14 @@
-#include <cupti.h>
+#include <cstdlib>
 #include <cstdio>
 #include <iostream>
 #include <thread>
 #include <chrono>
 
+#include <cupti.h>
+
 #include "openvprof/logger.hpp"
 #include "openvprof/record.hpp"
+#include "openvprof/record_writer.hpp"
 #include "openvprof/cupti_activity.hpp"
 #include "openvprof/nvml.hpp"
 
@@ -14,6 +17,7 @@
 
 using namespace boost::lockfree;
 using openvprof::Record;
+using openvprof::RecordWriter;
 
 
 class Profiler {
@@ -24,28 +28,33 @@ class Profiler {
    queue<Record*> records_;  
    CUpti_SubscriberHandle subscriber;
    openvprof::nvml::Poller nvml_poller_;
-   std::thread record_writer_;
- 
+   openvprof::RecordWriter record_writer_;
+   std::string output_path_;
+
 };
 
-
-void record_writer(queue<Record*> &records) {
-  using nlohmann::json;
-  Record *record;
-  while (records.pop(record)) {
-    json j = *record;
-    delete record;
-    LOG(trace, j.dump());
-  }
-}
 
 
 Profiler::Profiler() : records_(128), nvml_poller_(&records_)  {
   if (!logger::console || logger::console->name() != "openvprof") {
     logger::console  = spdlog::stderr_logger_mt("openvprof");
   }
+
   LOG(trace, "Hello from the logger");
   logger::console->set_level(spdlog::level::trace);
+
+
+  std::string output_path("openvprof.json");
+  {
+    char *c = std::getenv("OPENVPROF_OUTPUT_PATH");
+    if (c) {
+      output_path_ = c;
+    }
+  }
+  LOG(debug, "Output path is {}", output_path_);
+
+  record_writer_ = RecordWriter(&records_, output_path);
+  record_writer_.start();
 
   // init CUPTI activity API
   openvprof::initTrace();
@@ -68,11 +77,9 @@ Profiler::~Profiler() {
   nvml_poller_.stop();
   LOG(trace, "stopping nvml poller.");
 
-  LOG(trace, "Starting record writer thread");
-  record_writer_ = std::thread(record_writer, std::ref(records_));
 
   LOG(trace, "waiting for record writer.");
-  record_writer_.join();
+  record_writer_.stop();
   LOG(trace, "record writer finished.");
   logger::console->flush();
 }
@@ -92,6 +99,7 @@ int main(int argc, char **argv) {
     auto c = bp::child(cmd);
     c.wait();
     int ret = c.exit_code();
+    (void)ret;
 
   }
 
