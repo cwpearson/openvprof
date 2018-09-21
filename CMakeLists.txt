@@ -108,6 +108,8 @@ target_link_libraries(openvprof cuda)
 target_link_libraries(openvprof "-Wl,--no-undefined")
 
 add_executable(vec examples/samples/vectorAdd/vectorAdd.cu)
+add_executable(um examples/samples/unified_memory/um.cu)
+target_link_libraries(um cuda)
 
 target_compile_definitions(openvprof PUBLIC -DPROJECT_NAME=openvprof)
 set_target_properties(openvprof PROPERTIES
