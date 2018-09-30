@@ -3,6 +3,8 @@
 #include <chrono>
 
 #include <nlohmann/json.hpp>
+#include <cupti.h>
+
 
 namespace openvprof {
 
@@ -78,10 +80,6 @@ class SpanCorrelationRecord : public SpanRecord {
             auto j = SpanRecord::to_json();
             j["correlation"] = correlation_id_;
             return j;
-            return nlohmann::json{
-                {"wall_start_ns", std::chrono::duration_cast<std::chrono::nanoseconds>(start_.time_since_epoch()).count()},
-                {"wall_duration_ns", std::chrono::duration_cast<std::chrono::nanoseconds>(duration_).count()}
-            };
         }
 };
 
@@ -93,6 +91,13 @@ public:
     nlohmann::json to_json() const override;
 };
 
+
+class CuptiActivityUnifiedMemoryCounterRecord: public Record {
+public:
+    CUpti_ActivityUnifiedMemoryCounter2 raw_;
+    CuptiActivityUnifiedMemoryCounterRecord(CUpti_ActivityUnifiedMemoryCounter2 *raw) : raw_(*raw) {}
+    nlohmann::json to_json() const override;
+};
 
 class CuptiActivityMemcpyRecord : public SpanCorrelationRecord {
 public:

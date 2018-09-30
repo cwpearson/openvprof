@@ -291,13 +291,15 @@ printActivity(CUpti_Activity *record)
   case CUPTI_ACTIVITY_KIND_UNIFIED_MEMORY_COUNTER:
         {
             CUpti_ActivityUnifiedMemoryCounter2 *uvm = (CUpti_ActivityUnifiedMemoryCounter2 *)record;
-            printf("UNIFIED_MEMORY_COUNTER [ %llu %llu ] kind=%s value=%llu src %u dst %u\n",
-                (unsigned long long)(uvm->start),
-                (unsigned long long)(uvm->end),
-                getUvmCounterKindString(uvm->counterKind),
-                (unsigned long long)uvm->value,
-                uvm->srcId,
-                uvm->dstId);
+            // printf("UNIFIED_MEMORY_COUNTER [ %llu %llu ] kind=%s value=%llu src %u dst %u\n",
+            //     (unsigned long long)(uvm->start),
+            //     (unsigned long long)(uvm->end),
+            //     getUvmCounterKindString(uvm->counterKind),
+            //     (unsigned long long)uvm->value,
+            //     uvm->srcId,
+            //     uvm->dstId);
+            auto *r = new openvprof::CuptiActivityUnifiedMemoryCounterRecord(uvm);
+            records_->push(r);
             break;
         }
   default:

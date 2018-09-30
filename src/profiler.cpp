@@ -73,12 +73,12 @@ Profiler::~Profiler() {
   LOG(info, "finalizing CUPTI activity API");
   openvprof::finalizeTrace();
 
-  LOG(trace, "stopping nvml poller.");
+  LOG(trace, "stopping nvml poller...");
   nvml_poller_.stop();
-  LOG(trace, "stopping nvml poller.");
+  LOG(trace, "stoped nvml poller");
 
 
-  LOG(trace, "waiting for record writer.");
+  LOG(trace, "waiting for record writer...");
   record_writer_.stop();
   LOG(trace, "record writer finished.");
   logger::console->flush();
