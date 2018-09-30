@@ -10,9 +10,9 @@ void RecordWriter::run() {
 
     file << "[\n";
 
-    while(Signal::CONTINUE == signal_) {
+    Record *r;
 
-        Record *r;
+    while(Signal::CONTINUE == signal_) {
         while(records_->pop(r)) {
             nlohmann::json j = *r;
             delete r;
@@ -22,6 +22,15 @@ void RecordWriter::run() {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
+    }
+
+    LOG(debug, "RecordWriter::run(): final flush");
+    while(records_->pop(r)) {
+        nlohmann::json j = *r;
+        delete r;
+        r = nullptr;
+        LOG(trace, "write {}", j.dump());
+        file << j << ",\n";
     }
 
     file << "]\n";
