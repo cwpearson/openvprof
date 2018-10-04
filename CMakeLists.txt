@@ -33,7 +33,7 @@ find_package(Boost REQUIRED COMPONENTS system CONFIG)
 find_package(fmt REQUIRED CONFIG)
 find_package(spdlog CONFIG REQUIRED CONFIG)
 find_package(CUDA REQUIRED)
-
+find_package(NvidiaML REQUIRED)
 
 # Disable extended variants of C++ dialects
 # i.e. don't choose gnu++17 over c++17
@@ -103,7 +103,7 @@ target_link_libraries(openvprof spdlog::spdlog)
 target_link_libraries(openvprof ${CUDA_LIBRARIES})
 target_link_libraries(openvprof Boost::boost Boost::system)
 target_link_libraries(openvprof -L${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64 cupti)
-target_link_libraries(openvprof nvidia-ml)
+target_link_libraries(openvprof ${NvidiaML_LIBRARIES})
 target_link_libraries(openvprof cuda)
 target_link_libraries(openvprof "-Wl,--no-undefined")
 
