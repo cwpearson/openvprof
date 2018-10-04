@@ -34,9 +34,11 @@ void Poller::run() {
       // Query some system info and insert records
 
       // CUDA driver version
+      {
       auto *r = new NvmlCudaDriverVersionRecord;
       nvmlSystemGetCudaDriverVersion(&r->version);
       records_->push(r);
+      }
 
     // Device handles
     unsigned int num_devices;
@@ -55,9 +57,12 @@ void Poller::run() {
         for (const auto d : devices) {
             nvmlPstates_t pState;
             NVML_CHECK(nvmlDeviceGetPerformanceState(d, &pState));
-            auto *r = new NvmlPstateRecord;
-            r->pstate_ = pState;
+            auto timestamp = std::chrono::high_resolution_clock::now();
+
+            {
+            auto *r = new NvmlPstateRecord(timestamp, pState);
             records_->push(r);
+            }
         }
 
           std::this_thread::sleep_for(std::chrono::milliseconds(50));

@@ -5,8 +5,9 @@
 #include <nlohmann/json.hpp>
 #include <cupti.h>
 
-
 namespace openvprof {
+
+typedef std::chrono::high_resolution_clock::time_point time_point;
 
 class Record {
     public:
@@ -17,10 +18,8 @@ class Record {
 
 class InstantRecord : public Record {
     public:
-        InstantRecord(std::chrono::high_resolution_clock::time_point &when) : when_(when) {}
-
-    protected:
-        std::chrono::high_resolution_clock::time_point when_;
+        InstantRecord(time_point &when) : when_(when) {}
+        time_point when_;
 
     public:
         virtual nlohmann::json to_json() const {
@@ -37,8 +36,9 @@ class NvmlCudaDriverVersionRecord : public Record {
 };
 
 
-class NvmlPstateRecord : public Record {
+class NvmlPstateRecord : public InstantRecord {
  public:
+  NvmlPstateRecord(time_point &when, int pstate) : InstantRecord(when), pstate_(pstate) {}
   int pstate_;
   nlohmann::json to_json() const override;
 };

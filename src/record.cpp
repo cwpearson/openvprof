@@ -1,7 +1,7 @@
 #include "openvprof/record.hpp"
 
 using nlohmann::json;
-
+using std::chrono::high_resolution_clock;
 
 static const char *CORRELATION = "cor";
 static const char *DST = "dst";
@@ -39,7 +39,9 @@ json NvmlCudaDriverVersionRecord::to_json() const {
 
 
 json NvmlPstateRecord::to_json() const{
-    return json{{"pstate", pstate_}};
+    auto j = InstantRecord::to_json();
+    j["pstate"] = pstate_;
+    return j;
 }
 
 
