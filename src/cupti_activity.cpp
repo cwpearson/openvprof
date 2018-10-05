@@ -217,12 +217,12 @@ printActivity(CUpti_Activity *record)
   case CUPTI_ACTIVITY_KIND_MEMCPY:
     {
       CUpti_ActivityMemcpy *memcpy = (CUpti_ActivityMemcpy *) record;
-      printf("MEMCPY %s [ %llu - %llu ] device %u, context %u, stream %u, correlation %u/r%u\n",
-             getMemcpyKindString((CUpti_ActivityMemcpyKind) memcpy->copyKind),
-             (unsigned long long) (memcpy->start - startTimestamp),
-             (unsigned long long) (memcpy->end - startTimestamp),
-             memcpy->deviceId, memcpy->contextId, memcpy->streamId,
-             memcpy->correlationId, memcpy->runtimeCorrelationId);
+      // printf("MEMCPY %s [ %llu - %llu ] device %u, context %u, stream %u, correlation %u/r%u\n",
+      //        getMemcpyKindString((CUpti_ActivityMemcpyKind) memcpy->copyKind),
+      //        (unsigned long long) (memcpy->start - startTimestamp),
+      //        (unsigned long long) (memcpy->end - startTimestamp),
+      //        memcpy->deviceId, memcpy->contextId, memcpy->streamId,
+      //        memcpy->correlationId, memcpy->runtimeCorrelationId);
 
       const char *copy_kind = getMemcpyKindString((CUpti_ActivityMemcpyKind) memcpy->copyKind);
       const char *src_kind = getMemoryKindString((CUpti_ActivityMemoryKind) memcpy->srcKind);
@@ -253,17 +253,6 @@ printActivity(CUpti_Activity *record)
     {
       const char* kindString = (record->kind == CUPTI_ACTIVITY_KIND_KERNEL) ? "KERNEL" : "CONC KERNEL";
       CUpti_ActivityKernel4 *kernel = (CUpti_ActivityKernel4 *) record;
-      // printf("%s \"%s\" [ %llu - %llu ] device %u, context %u, stream %u, correlation %u\n",
-      //        kindString,
-      //        kernel->name,
-      //        (unsigned long long) (kernel->start - startTimestamp),
-      //        (unsigned long long) (kernel->end - startTimestamp),
-      //        kernel->deviceId, kernel->contextId, kernel->streamId,
-      //        kernel->correlationId);
-      // printf("    grid [%u,%u,%u], block [%u,%u,%u], shared memory (static %u, dynamic %u)\n",
-      //        kernel->gridX, kernel->gridY, kernel->gridZ,
-      //        kernel->blockX, kernel->blockY, kernel->blockZ,
-      //        kernel->staticSharedMemory, kernel->dynamicSharedMemory);
 
       {
       auto *r = new openvprof::CuptiActivityKernelRecord(kernel);
@@ -279,6 +268,11 @@ printActivity(CUpti_Activity *record)
              (unsigned long long) (api->start - startTimestamp),
              (unsigned long long) (api->end - startTimestamp),
              api->processId, api->threadId, api->correlationId);
+
+      {
+      auto *r = new openvprof::CuptiActivityApiRecord(api);
+      records_->push(r);
+      }
       break;
     }
   case CUPTI_ACTIVITY_KIND_RUNTIME:

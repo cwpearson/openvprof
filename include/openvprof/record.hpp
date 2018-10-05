@@ -84,6 +84,13 @@ class SpanCorrelationRecord : public SpanRecord {
 };
 
 
+class CuptiActivityApiRecord: public Record {
+public:
+    CUpti_ActivityAPI api_;
+    CuptiActivityApiRecord(CUpti_ActivityAPI *api) : api_(*api) {}
+    nlohmann::json to_json() const override;
+};
+
 class CuptiActivityKernelRecord : public Record {
 public:
     CUpti_ActivityKernel4 kernel_;

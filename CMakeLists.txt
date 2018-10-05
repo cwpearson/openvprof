@@ -77,6 +77,8 @@ set(CPP_SOURCES
   src/profiler.cpp
   src/logger.cpp
   src/cupti_activity.cpp
+  src/cupti_driver_cbid.cpp
+  src/cupti_runtime_cbid.cpp
   src/nvml.cpp
   src/record.cpp
   src/record_writer.cpp

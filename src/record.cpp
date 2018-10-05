@@ -1,21 +1,23 @@
 #include "openvprof/record.hpp"
+#include "openvprof/cupti_utils.hpp"
 
 using nlohmann::json;
 using std::chrono::high_resolution_clock;
 
+static const char *CBID = "cbid";
 static const char *CONTEXT_ID = "ctx";
 static const char *COPY_KIND = "copy_kind";
-static const char *CORRELATION = "cor";
+static const char *CORRELATION_ID = "cor";
 static const char *DEVICE_ID = "dev";
 static const char *DST_ID = "dst_id";
 static const char *DST_KIND = "dst_kind";
 static const char *KIND = "kind";
 static const char *NAME = "name";
-static const char *PROCESS = "pid";
+static const char *PROCESS_ID = "pid";
 static const char *SRC_ID = "src_id";
 static const char *SRC_KIND = "src_kind";
 static const char *STREAM_ID = "stream";
-static const char *THREAD = "tid";
+static const char *THREAD_ID = "tid";
 static const char *UVM_COUNTER_KIND = "counter_kind";
 static const char *VALUE = "value";
 static const char *WALL_START_NS = "wall_start_ns";
@@ -63,6 +65,18 @@ json NvmlPstateRecord::to_json() const{
     return j;
 }
 
+
+json CuptiActivityApiRecord::to_json() const{
+    return json {
+        {KIND, "activity_api"},
+        {WALL_START_NS, api_.start},
+        {WALL_DURATION_NS, api_.end - api_.start},
+        {PROCESS_ID, api_.processId},
+        {THREAD_ID, api_.threadId},
+        {CORRELATION_ID, api_.correlationId},
+        {CBID, getDriverCbidName(static_cast<CUpti_driver_api_trace_cbid>(api_.cbid))},
+    };
+}
 
 json CuptiActivityKernelRecord::to_json() const{
     return json {
