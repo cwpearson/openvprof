@@ -84,10 +84,10 @@ class SpanCorrelationRecord : public SpanRecord {
 };
 
 
-class CuptiActivityKernelRecord : public SpanCorrelationRecord {
+class CuptiActivityKernelRecord : public Record {
 public:
-    uint32_t correlation_id_;
-    CuptiActivityKernelRecord(uint64_t start, uint64_t end, const uint32_t correlation_id) : SpanCorrelationRecord(start, end, correlation_id) {}
+    CUpti_ActivityKernel4 kernel_;
+    CuptiActivityKernelRecord(CUpti_ActivityKernel4 *kernel) : kernel_(*kernel) {}
     nlohmann::json to_json() const override;
 };
 

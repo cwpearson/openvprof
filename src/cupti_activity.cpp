@@ -32,6 +32,18 @@ getUvmCounterKindString(CUpti_ActivityUnifiedMemoryCounterKind kind)
         return "BYTES_TRANSFER_HTOD";
     case CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_BYTES_TRANSFER_DTOH:
         return "BYTES_TRANSFER_DTOH";
+    case CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_CPU_PAGE_FAULT_COUNT:
+      return "CPU_PAGE_FAULT_COUNT";
+    case CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_GPU_PAGE_FAULT:
+      return "GPU_PAGE_FAULT";
+    case CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_THRASHING:
+      return "THRASH";
+    case CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_THROTTLING:
+      return "THROTTLE";
+    case CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_REMOTE_MAP:
+      return "MAP";
+    case CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_BYTES_TRANSFER_DTOD:
+      return "BYTES_TRANFER_DTOD";
     default:
         break;
     }
@@ -241,20 +253,22 @@ printActivity(CUpti_Activity *record)
     {
       const char* kindString = (record->kind == CUPTI_ACTIVITY_KIND_KERNEL) ? "KERNEL" : "CONC KERNEL";
       CUpti_ActivityKernel4 *kernel = (CUpti_ActivityKernel4 *) record;
-      printf("%s \"%s\" [ %llu - %llu ] device %u, context %u, stream %u, correlation %u\n",
-             kindString,
-             kernel->name,
-             (unsigned long long) (kernel->start - startTimestamp),
-             (unsigned long long) (kernel->end - startTimestamp),
-             kernel->deviceId, kernel->contextId, kernel->streamId,
-             kernel->correlationId);
-      printf("    grid [%u,%u,%u], block [%u,%u,%u], shared memory (static %u, dynamic %u)\n",
-             kernel->gridX, kernel->gridY, kernel->gridZ,
-             kernel->blockX, kernel->blockY, kernel->blockZ,
-             kernel->staticSharedMemory, kernel->dynamicSharedMemory);
+      // printf("%s \"%s\" [ %llu - %llu ] device %u, context %u, stream %u, correlation %u\n",
+      //        kindString,
+      //        kernel->name,
+      //        (unsigned long long) (kernel->start - startTimestamp),
+      //        (unsigned long long) (kernel->end - startTimestamp),
+      //        kernel->deviceId, kernel->contextId, kernel->streamId,
+      //        kernel->correlationId);
+      // printf("    grid [%u,%u,%u], block [%u,%u,%u], shared memory (static %u, dynamic %u)\n",
+      //        kernel->gridX, kernel->gridY, kernel->gridZ,
+      //        kernel->blockX, kernel->blockY, kernel->blockZ,
+      //        kernel->staticSharedMemory, kernel->dynamicSharedMemory);
 
-      auto *r = new openvprof::CuptiActivityKernelRecord(kernel->start, kernel->end, kernel->correlationId);
+      {
+      auto *r = new openvprof::CuptiActivityKernelRecord(kernel);
       records_->push(r);
+      }
       break;
     }
   case CUPTI_ACTIVITY_KIND_DRIVER:
@@ -380,19 +394,41 @@ openvprof::initTrace(queue<Record*> *records)
 // FIXME: why is cuInit() needed before this,
 // FIXME: unified_memory example has this after callbacks.
 cuInit(0);
-CUpti_ActivityUnifiedMemoryCounterConfig config[2];
+CUpti_ActivityUnifiedMemoryCounterConfig config[8];
     // configure unified memory counters
-    config[0].scope = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_SCOPE_PROCESS_SINGLE_DEVICE;
+    config[0].scope = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_SCOPE_PROCESS_ALL_DEVICES;
     config[0].kind = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_BYTES_TRANSFER_HTOD;
-    config[0].deviceId = 0;
     config[0].enable = 1;
 
-    config[1].scope = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_SCOPE_PROCESS_SINGLE_DEVICE;
+    config[1].scope = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_SCOPE_PROCESS_ALL_DEVICES;
     config[1].kind = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_BYTES_TRANSFER_DTOH;
-    config[1].deviceId = 0;
     config[1].enable = 1;
 
-    CUptiResult res = cuptiActivityConfigureUnifiedMemoryCounter(config, 2);
+    config[2].scope = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_SCOPE_PROCESS_ALL_DEVICES;
+    config[2].kind = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_CPU_PAGE_FAULT_COUNT;
+    config[2].enable = 1;
+
+    config[3].scope = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_SCOPE_PROCESS_ALL_DEVICES;
+    config[3].kind = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_GPU_PAGE_FAULT;
+    config[3].enable = 1;
+
+    config[4].scope = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_SCOPE_PROCESS_ALL_DEVICES;
+    config[4].kind = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_THRASHING;
+    config[4].enable = 1;
+
+    config[5].scope = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_SCOPE_PROCESS_ALL_DEVICES;
+    config[5].kind = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_THROTTLING;
+    config[5].enable = 1;
+
+    config[6].scope = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_SCOPE_PROCESS_ALL_DEVICES;
+    config[6].kind = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_REMOTE_MAP;
+    config[6].enable = 1;
+
+    config[7].scope = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_SCOPE_PROCESS_ALL_DEVICES;
+    config[7].kind = CUPTI_ACTIVITY_UNIFIED_MEMORY_COUNTER_KIND_BYTES_TRANSFER_DTOD;
+    config[7].enable = 1;
+
+    CUptiResult res = cuptiActivityConfigureUnifiedMemoryCounter(config, 8);
     if (res == CUPTI_ERROR_UM_PROFILING_NOT_SUPPORTED) {
         LOG(warn, "Unified memory is not supported on the underlying platform.\n");
     }
