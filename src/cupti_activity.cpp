@@ -50,59 +50,6 @@ getUvmCounterKindString(CUpti_ActivityUnifiedMemoryCounterKind kind)
     return "<unknown>";
 }
 
-static const char *
-getMemcpyKindString(CUpti_ActivityMemcpyKind kind)
-{
-  switch (kind) {
-  case CUPTI_ACTIVITY_MEMCPY_KIND_HTOD:
-    return "HtoD";
-  case CUPTI_ACTIVITY_MEMCPY_KIND_DTOH:
-    return "DtoH";
-  case CUPTI_ACTIVITY_MEMCPY_KIND_HTOA:
-    return "HtoA";
-  case CUPTI_ACTIVITY_MEMCPY_KIND_ATOH:
-    return "AtoH";
-  case CUPTI_ACTIVITY_MEMCPY_KIND_ATOA:
-    return "AtoA";
-  case CUPTI_ACTIVITY_MEMCPY_KIND_ATOD:
-    return "AtoD";
-  case CUPTI_ACTIVITY_MEMCPY_KIND_DTOA:
-    return "DtoA";
-  case CUPTI_ACTIVITY_MEMCPY_KIND_DTOD:
-    return "DtoD";
-  case CUPTI_ACTIVITY_MEMCPY_KIND_HTOH:
-    return "HtoH";
-  default:
-    break;
-  }
-
-  return "<unknown>";
-}
-
-static const char *
-getMemoryKindString(CUpti_ActivityMemoryKind kind)
-{
-  switch (kind) {
-  case CUPTI_ACTIVITY_MEMORY_KIND_PAGEABLE:
-    return "pageable";
-  case CUPTI_ACTIVITY_MEMORY_KIND_PINNED:
-    return "pinned";
-  case CUPTI_ACTIVITY_MEMORY_KIND_DEVICE:
-    return "device";
-  case CUPTI_ACTIVITY_MEMORY_KIND_ARRAY:
-    return "array";
-  case CUPTI_ACTIVITY_MEMORY_KIND_MANAGED:
-    return "managed";
-  case CUPTI_ACTIVITY_MEMORY_KIND_DEVICE_STATIC:
-    return "device-static";
-  case CUPTI_ACTIVITY_MEMORY_KIND_MANAGED_STATIC:
-    return "managed-static";
-  default:
-    break;
-  }
-
-  return "<unknown>";
-}
 
 const char *
 getActivityOverheadKindString(CUpti_ActivityOverheadKind kind)
@@ -224,18 +171,11 @@ printActivity(CUpti_Activity *record)
       //        memcpy->deviceId, memcpy->contextId, memcpy->streamId,
       //        memcpy->correlationId, memcpy->runtimeCorrelationId);
 
-      const char *copy_kind = getMemcpyKindString((CUpti_ActivityMemcpyKind) memcpy->copyKind);
-      const char *src_kind = getMemoryKindString((CUpti_ActivityMemoryKind) memcpy->srcKind);
-      const char *dst_kind = getMemoryKindString((CUpti_ActivityMemoryKind) memcpy->dstKind);
-      auto *r = new openvprof::CuptiActivityMemcpyRecord(
-        memcpy->start,
-         memcpy->end,
-          memcpy->correlationId,
-           copy_kind,
-        src_kind,
-        dst_kind);
+  {
+      auto *r = new openvprof::CuptiActivityMemcpyRecord(memcpy);
       records_->push(r);
       break;
+  }
     }
   case CUPTI_ACTIVITY_KIND_MEMSET:
     {

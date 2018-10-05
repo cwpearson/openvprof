@@ -106,13 +106,10 @@ public:
     nlohmann::json to_json() const override;
 };
 
-class CuptiActivityMemcpyRecord : public SpanCorrelationRecord {
+class CuptiActivityMemcpyRecord : public Record {
 public:
-    std::string copy_kind_;
-    std::string src_kind_;
-    std::string dst_kind_;
-    CuptiActivityMemcpyRecord(uint64_t start, uint64_t end, const uint32_t correlation_id,
-    const char *copy_kind, const char *src_kind, const char *dst_kind) : SpanCorrelationRecord(start, end, correlation_id), copy_kind_(copy_kind), src_kind_(src_kind), dst_kind_(dst_kind) {}
+    CUpti_ActivityMemcpy memcpy_;
+    CuptiActivityMemcpyRecord(CUpti_ActivityMemcpy *memcpy) : memcpy_(*memcpy) {}
     nlohmann::json to_json() const override;
 };
 

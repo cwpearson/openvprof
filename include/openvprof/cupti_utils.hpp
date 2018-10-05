@@ -20,8 +20,11 @@ inline void cuptiAssert(CUptiResult code, const char *file, int line,
   }
 }
 
-const char * getDriverCbidName(CUpti_driver_api_trace_cbid cbid);
-const char * getRuntimeCbidName(CUpti_runtime_api_trace_cbid cbid);
+const char *getDriverCbidName(CUpti_driver_api_trace_cbid cbid);
+const char *getRuntimeCbidName(CUpti_runtime_api_trace_cbid cbid);
+const char *getMemcpyKindString(CUpti_ActivityMemcpyKind kind);
+const char *getMemoryKindString(CUpti_ActivityMemoryKind kind);
+
 
 namespace cprof {
 

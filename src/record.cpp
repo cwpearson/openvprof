@@ -4,6 +4,7 @@
 using nlohmann::json;
 using std::chrono::high_resolution_clock;
 
+static const char *BYTES = "bytes";
 static const char *CBID = "cbid";
 static const char *CONTEXT_ID = "ctx";
 static const char *COPY_KIND = "copy_kind";
@@ -91,12 +92,21 @@ json CuptiActivityKernelRecord::to_json() const{
 }
 
 json CuptiActivityMemcpyRecord::to_json() const{
-    auto j = SpanCorrelationRecord::to_json();
-    j[KIND] = "activity_memcpy";
-    j[COPY_KIND] = copy_kind_;
-    j[SRC_KIND] = src_kind_;
-    j[DST_KIND] = dst_kind_;
-    return j;
+      // printf("MEMCPY %s [ %llu - %llu ] device %u, context %u, stream %u, correlation %u/r%u\n",
+      //        getMemcpyKindString((CUpti_ActivityMemcpyKind) memcpy->copyKind),
+      //        (unsigned long long) (memcpy->start - startTimestamp),
+      //        (unsigned long long) (memcpy->end - startTimestamp),
+      //        memcpy->deviceId, memcpy->contextId, memcpy->streamId,
+      //        memcpy->correlationId, memcpy->runtimeCorrelationId);
+
+
+    return json {
+        {KIND, "activity_memcpy"},
+        {BYTES, memcpy_.bytes},
+        {COPY_KIND, getMemcpyKindString(static_cast<CUpti_ActivityMemcpyKind>(memcpy_.copyKind))},
+        {SRC_KIND,  getMemoryKindString(static_cast<CUpti_ActivityMemoryKind>(memcpy_.srcKind))},
+        {DST_KIND,  getMemoryKindString(static_cast<CUpti_ActivityMemoryKind>(memcpy_.dstKind))},
+    };
 }
 
 json CuptiActivityUnifiedMemoryCounterRecord::to_json() const {

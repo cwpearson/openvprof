@@ -1,15 +1,10 @@
 #include <string>
-#include <cupti_runtime_cbid.h>
-#include <cupti_driver_cbid.h>
 
+
+#include "openvprof/cupti_utils.hpp"
 #include "openvprof/logger.hpp"
 
-#define DRIVER_CASE(n) \
-    case CUPTI_DRIVER_TRACE_CBID_##n: \
-    return #n;
-
-
-const char * getRuntimeCbidName(CUpti_runtime_api_trace_cbid cbid) {
+const char *getRuntimeCbidName(CUpti_runtime_api_trace_cbid cbid) {
     switch(cbid) {
     case CUPTI_RUNTIME_TRACE_CBID_cudaSetupArgument_v3020:
         return "cudaSetupArgument_v3020";
@@ -18,7 +13,9 @@ const char * getRuntimeCbidName(CUpti_runtime_api_trace_cbid cbid) {
     }
 }
 
-
+#define DRIVER_CASE(n) \
+    case CUPTI_DRIVER_TRACE_CBID_##n: \
+    return #n;
 const char * getDriverCbidName(CUpti_driver_api_trace_cbid cbid) {
     switch(cbid) {
     DRIVER_CASE(cuInit) // 1
@@ -33,8 +30,61 @@ const char * getDriverCbidName(CUpti_driver_api_trace_cbid cbid) {
         return "<unknown>";
     }
 }
+#undef DRIVER_CASE
 
-#undef CASE
+const char *getMemcpyKindString(CUpti_ActivityMemcpyKind kind)
+{
+  switch (kind) {
+  case CUPTI_ACTIVITY_MEMCPY_KIND_HTOD:
+    return "HtoD";
+  case CUPTI_ACTIVITY_MEMCPY_KIND_DTOH:
+    return "DtoH";
+  case CUPTI_ACTIVITY_MEMCPY_KIND_HTOA:
+    return "HtoA";
+  case CUPTI_ACTIVITY_MEMCPY_KIND_ATOH:
+    return "AtoH";
+  case CUPTI_ACTIVITY_MEMCPY_KIND_ATOA:
+    return "AtoA";
+  case CUPTI_ACTIVITY_MEMCPY_KIND_ATOD:
+    return "AtoD";
+  case CUPTI_ACTIVITY_MEMCPY_KIND_DTOA:
+    return "DtoA";
+  case CUPTI_ACTIVITY_MEMCPY_KIND_DTOD:
+    return "DtoD";
+  case CUPTI_ACTIVITY_MEMCPY_KIND_HTOH:
+    return "HtoH";
+  default:
+    break;
+  }
+
+  return "<unknown>";
+}
+
+const char *
+getMemoryKindString(CUpti_ActivityMemoryKind kind)
+{
+  switch (kind) {
+  case CUPTI_ACTIVITY_MEMORY_KIND_PAGEABLE:
+    return "pageable";
+  case CUPTI_ACTIVITY_MEMORY_KIND_PINNED:
+    return "pinned";
+  case CUPTI_ACTIVITY_MEMORY_KIND_DEVICE:
+    return "device";
+  case CUPTI_ACTIVITY_MEMORY_KIND_ARRAY:
+    return "array";
+  case CUPTI_ACTIVITY_MEMORY_KIND_MANAGED:
+    return "managed";
+  case CUPTI_ACTIVITY_MEMORY_KIND_DEVICE_STATIC:
+    return "device-static";
+  case CUPTI_ACTIVITY_MEMORY_KIND_MANAGED_STATIC:
+    return "managed-static";
+  default:
+    break;
+  }
+
+  return "<unknown>";
+}
+
 
 /*
 typedef enum CUpti_driver_api_trace_cbid_enum {
