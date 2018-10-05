@@ -263,12 +263,6 @@ printActivity(CUpti_Activity *record)
   case CUPTI_ACTIVITY_KIND_DRIVER:
     {
       CUpti_ActivityAPI *api = (CUpti_ActivityAPI *) record;
-      printf("DRIVER cbid=%u [ %llu - %llu ] process %u, thread %u, correlation %u\n",
-             api->cbid,
-             (unsigned long long) (api->start - startTimestamp),
-             (unsigned long long) (api->end - startTimestamp),
-             api->processId, api->threadId, api->correlationId);
-
       {
       auto *r = new openvprof::CuptiActivityApiRecord(api);
       records_->push(r);

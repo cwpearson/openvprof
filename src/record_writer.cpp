@@ -20,8 +20,9 @@ void RecordWriter::run() {
             LOG(trace, "write {}", j.dump());
             file << j << ",\n";
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
+        LOG(trace, "sleeping record writer");
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        LOG(trace, "wakeup record writer");
     }
 
     LOG(debug, "RecordWriter::run(): final flush");
