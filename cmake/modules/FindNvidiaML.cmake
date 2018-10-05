@@ -7,7 +7,7 @@ find_path(NvidiaML_INCLUDE_DIR
 )
 find_library(NvidiaML_LIBRARY
     NAMES nvidia-ml
-    PATHS "/usr/lib/nvidia-*"
+    PATHS "/usr/lib/nvidia-*" "/usr/lib/powerpc64le-linux-gnu"
     PATH_SUFFIXES lib
 )
 
