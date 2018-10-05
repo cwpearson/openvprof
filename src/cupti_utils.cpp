@@ -4,14 +4,26 @@
 #include "openvprof/cupti_utils.hpp"
 #include "openvprof/logger.hpp"
 
+#define RUNTIME_CASE(n) \
+    case CUPTI_RUNTIME_TRACE_CBID_##n: \
+    return #n;
 const char *getRuntimeCbidName(CUpti_runtime_api_trace_cbid cbid) {
     switch(cbid) {
-    case CUPTI_RUNTIME_TRACE_CBID_cudaSetupArgument_v3020:
-        return "cudaSetupArgument_v3020";
+    RUNTIME_CASE(cudaGetLastError_v3020) // 10
+    RUNTIME_CASE(cudaSetupArgument_v3020)
+    RUNTIME_CASE(cudaMalloc_v3020) // 20
+    RUNTIME_CASE(cudaFree_v3020)  // 22
+    RUNTIME_CASE(cudaMemcpy_v3020) // 31
+    RUNTIME_CASE(cudaDeviceReset_v3020) // 164
+    RUNTIME_CASE(cudaDeviceSynchronize_v3020) // 165
+    RUNTIME_CASE(cudaMallocManaged_v6000) // 206
+    RUNTIME_CASE(cudaLaunchKernel_v7000) // 211
     default:
+        LOG(warn, "unhandled name for runtime cbid: {}", cbid);
         return "<unknown>";
     }
 }
+#undef RUNTIME_CASE
 
 #define DRIVER_CASE(n) \
     case CUPTI_DRIVER_TRACE_CBID_##n: \
@@ -24,9 +36,11 @@ const char * getDriverCbidName(CUpti_driver_api_trace_cbid cbid) {
     DRIVER_CASE(cuDeviceGetCount) // 4
     DRIVER_CASE(cuDeviceGetName) // 5
     DRIVER_CASE(cuDeviceGetAttribute) // 9
+    DRIVER_CASE(cuModuleUnload) // 22
     DRIVER_CASE(cuDeviceTotalMem_v2) // 259
+    DRIVER_CASE(cuDevicePrimaryCtxRelease) // 387
     default:
-        LOG(warn, "unhandled driver cbid: {}", cbid);
+        LOG(warn, "unhandled name for driver cbid: {}", cbid);
         return "<unknown>";
     }
 }

@@ -40,8 +40,19 @@ Profiler::Profiler() : records_(128), nvml_poller_(&records_)  {
     logger::console  = spdlog::stderr_logger_mt("openvprof");
   }
 
+  std::string trace_level("info");
+  {
+
+
+  }
+  if ("info" == trace_level) {
+    logger::console->set_level(spdlog::level::info);
+  }
+
+
+
   LOG(trace, "Hello from the logger");
-  logger::console->set_level(spdlog::level::trace);
+  // logger::console->set_level(spdlog::level::trace);
 
 
   std::string output_path("openvprof.json");
