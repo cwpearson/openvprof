@@ -29,7 +29,6 @@ class Profiler {
    CUpti_SubscriberHandle subscriber;
    openvprof::nvml::Poller nvml_poller_;
    openvprof::RecordWriter record_writer_;
-   std::string output_path_;
 
 };
 
@@ -40,29 +39,42 @@ Profiler::Profiler() : records_(128), nvml_poller_(&records_)  {
     logger::console  = spdlog::stderr_logger_mt("openvprof");
   }
 
-  std::string trace_level("info");
+  std::string log_level("warn");
   {
-
-
+    char *c = std::getenv("OPENVPROF_LOG_LEVEL");
+    if (c) {
+      log_level = c;
+    }
   }
-  if ("info" == trace_level) {
+  if ("trace" == log_level) {
+    logger::console->set_level(spdlog::level::trace);
+  } else if ("debug" == log_level) {
+    logger::console->set_level(spdlog::level::debug);
+  } else if ("info" == log_level) {
     logger::console->set_level(spdlog::level::info);
+  } else if ("warn" == log_level) {
+    logger::console->set_level(spdlog::level::warn);
+  } else if ("err" == log_level) {
+    logger::console->set_level(spdlog::level::err);
+  } else if ("crit" == log_level) {
+    logger::console->set_level(spdlog::level::critical);
+  } else {
+    LOG(warn, "Unrecognized log level: {}. Try [trace, debug, info, warn (default), err, crit]", log_level);
   }
 
 
 
-  LOG(trace, "Hello from the logger");
-  // logger::console->set_level(spdlog::level::trace);
+  LOG(debug, "Hello from the logger");
 
 
   std::string output_path("openvprof.json");
   {
     char *c = std::getenv("OPENVPROF_OUTPUT_PATH");
     if (c) {
-      output_path_ = c;
+      output_path = c;
     }
   }
-  LOG(debug, "Output path is {}", output_path_);
+  LOG(debug, "Output path is {}", output_path);
 
   record_writer_ = RecordWriter(&records_, output_path);
   record_writer_.start();

@@ -74,11 +74,12 @@ set(CUDA_VERBOSE_BUILD OFF)
 
 
 set(CPP_SOURCES
-  src/profiler.cpp
-  src/logger.cpp
   src/cupti_activity.cpp
   src/cupti_utils.cpp
+  src/logger.cpp
   src/nvml.cpp
+  src/nvml_record.cpp
+  src/profiler.cpp
   src/record.cpp
   src/record_writer.cpp
 )
