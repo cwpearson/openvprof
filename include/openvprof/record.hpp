@@ -36,12 +36,7 @@ class NvmlCudaDriverVersionRecord : public Record {
 };
 
 
-class NvmlPstateRecord : public InstantRecord {
- public:
-  NvmlPstateRecord(time_point &when, int pstate) : InstantRecord(when), pstate_(pstate) {}
-  int pstate_;
-  nlohmann::json to_json() const override;
-};
+
 
 
 class SpanRecord : public Record {
