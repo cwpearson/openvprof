@@ -76,6 +76,7 @@ set(CUDA_VERBOSE_BUILD OFF)
 set(CPP_SOURCES
   src/cupti_activity.cpp
   src/cupti_utils.cpp
+  src/json_fields.cpp
   src/logger.cpp
   src/nvml.cpp
   src/nvml_record.cpp

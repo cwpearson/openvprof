@@ -5,9 +5,9 @@
 #include <nlohmann/json.hpp>
 #include <cupti.h>
 
-namespace openvprof {
+#include "openvprof/time.hpp"
 
-typedef std::chrono::high_resolution_clock::time_point time_point;
+namespace openvprof {
 
 class Record {
     public:

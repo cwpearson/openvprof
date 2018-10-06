@@ -1,10 +1,13 @@
 
 #include <nvml.h>
 #include <iostream>
+#include <vector>
+#include <array>
 
 #include "openvprof/logger.hpp"
 #include "openvprof/nvml.hpp"
 #include "openvprof/nvml_record.hpp"
+#include "openvprof/nvml_utils.hpp"
 
 #define NVML_CHECK(ans)                        \
     {                                          \
@@ -23,10 +26,10 @@ inline void nvmlAssert(nvmlReturn_t code, const char *file, int line,
     }
 }
 
-namespace openvprof
-{
-namespace nvml
-{
+namespace openvprof {
+    namespace nvml {
+
+
 
 void init()
 {
@@ -110,6 +113,18 @@ void Poller::start()
 void Poller::run()
 {
 
+    std::vector<std::array<std::array<unsigned long long, 2>, NVML_NVLINK_MAX_LINKS>> rxs;
+    std::vector<std::array<std::array<unsigned long long, 2>, NVML_NVLINK_MAX_LINKS>> txs;
+    rxs.resize(devices_.size());
+    txs.resize(devices_.size());
+    for (auto &a : rxs) {
+        a = {0};
+    }
+    for (auto &v : txs) {
+        v = {0};
+    }
+
+
     // Watch the NVML values of interest
     while (signal_ == Signal::CONTINUE)
     {
@@ -139,13 +154,77 @@ void Poller::run()
             for (auto linkIdx : active_nvlink_ids_[devIdx]) {
                 unsigned long long tx;
                 unsigned long long rx;
-                NVML_CHECK(nvmlDeviceGetNvLinkUtilizationCounter(dev, linkIdx, 0, &rx, &tx ));
+                auto time = now();
+                NVML_CHECK(nvmlDeviceGetNvLinkUtilizationCounter(dev, linkIdx, 0, &rx, &tx));
                 LOG(trace, "dev:{} link:{} ctr:0 rx:{} tx:{}", devIdx, linkIdx, rx, tx);
+                if (tx < txs[devIdx][linkIdx][0]) {
+                    LOG(warn, "tx counter rollover");
+                }
+                if (rx < rxs[devIdx][linkIdx][0]) {
+                    LOG(warn, "rx counter rollover");
+                }
+                txs[devIdx][linkIdx][0] = tx;
+                rxs[devIdx][linkIdx][0] = rx;
+                {
+                    auto *r = new NvmlNvlinkUtilizationCounterRecord(
+                        time,
+                        devIdx,
+                        linkIdx,
+                        tx,
+                        0,
+                        true
+                    );
+                    records_->push(r);
+                }
+                {
+                    auto *r = new NvmlNvlinkUtilizationCounterRecord(
+                        time,
+                        devIdx,
+                        linkIdx,
+                        rx,
+                        0,
+                        false
+                    );
+                    records_->push(r);
+                }
+
+
+                time = now();
                 NVML_CHECK(nvmlDeviceGetNvLinkUtilizationCounter(dev, linkIdx, 1, &rx, &tx ));
                 LOG(trace, "dev:{} link:{} ctr:1 rx:{} tx:{}", devIdx, linkIdx, rx, tx);
+                if (tx < txs[devIdx][linkIdx][1]) {
+                    LOG(warn, "tx counter rollover");
+                }
+                if (rx < rxs[devIdx][linkIdx][1]) {
+                    LOG(warn, "rx counter rollover");
+                }
+                txs[devIdx][linkIdx][1] = tx;
+                rxs[devIdx][linkIdx][1] = rx;
+
+                {
+                    auto *r = new NvmlNvlinkUtilizationCounterRecord(
+                        time,
+                        devIdx,
+                        linkIdx,
+                        tx,
+                        1,
+                        true
+                    );
+                    records_->push(r);
+                }
+                {
+                    auto *r = new NvmlNvlinkUtilizationCounterRecord(
+                        time,
+                        devIdx,
+                        linkIdx,
+                        rx,
+                        1,
+                        false
+                    );
+                    records_->push(r);
+                }
+
             }
-
-
             
         }
 
@@ -153,5 +232,6 @@ void Poller::run()
     }
 }
 
-} // namespace nvml
+
+    } // namepsace nvmp
 } // namespace openvprof

@@ -15,4 +15,16 @@ json NvmlPstateRecord::to_json() const {
     };
 }
 
+json NvmlNvlinkUtilizationCounterRecord::to_json() const {
+  
+  return json{
+      {KIND, "nvlink_utilization_counter"},
+      {WALL_START_NS, ns_since_epoch(start_)},
+      {BYTES, val_},
+      {DEVICE_ID, dev_},
+      {LINK_ID, link_},
+      {COUNTER_ID, counter_id_},
+  };
+}
+
 } // namespace openvprof
