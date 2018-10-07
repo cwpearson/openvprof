@@ -1,13 +1,15 @@
 #! python3
 
+
 class Bandwidth(object):
     def __init__(self, start_time):
         self.start_time = start_time
         self.cpu_cpu_tracks = {}
         self.cpu_gpu_tracks = {}
         self.gpu_gpu_tracks = {}
+
     def handle(self, record):
-        
+
         kind = record.get("kind", None)
         if kind == "activity_memcpy":
             bandwidth = record["bytes"] / (record["wall_duration_ns"] / 1e9)
@@ -45,7 +47,7 @@ class Bandwidth(object):
             counter_kind = record["counter_kind"]
             bandwidth = record["value"] / (record["wall_duration_ns"] / 1e9)
             if counter_kind == "BYTES_TRANSFER_DTOH":
-                name = "gpu" + str(record["src_id"]) + "-cpu" 
+                name = "gpu" + str(record["src_id"]) + "-cpu"
             elif counter_kind == "BYTES_TRANSFER_HTOD":
                 name = "cpu-gpu" + str(record["dst_id"])
             else:
@@ -72,8 +74,45 @@ class Bandwidth(object):
             }]
             return es
 
-
         return None
+
+
+class PcieBandwidth(object):
+    def __init__(self, start_time):
+        self.start_time = start_time
+
+    def handle(self, record):
+
+        kind = record.get("kind", None)
+        if kind == "pcie_throughput":
+            bandwidth = (record["kbytes"] * 1e3) / (record["wall_duration_ns"] / 1e9)
+
+            name = "gpu" + str(record["dev"]) + "-" + record["cntr_kind"]
+
+            es = []
+            es += [{
+                "pid": 'pcie_bw',
+                "name": name,
+                "ph": "C",
+                "ts": (record["wall_start_ns"] - self.start_time) / 1000,
+                "args": {
+                    "bw": bandwidth,
+                },
+            }]
+            es += [{
+                "pid": 'pcie_bw',
+                "name": name,
+                "ph": "C",
+                "ts": ((record["wall_start_ns"] + record["wall_duration_ns"]) - self.start_time) / 1000,
+                "args": {
+                    "bw": 0,
+                },
+            }]
+
+            return es
+        else:  # not a pcie throughput record
+            return None
+
 
 def make_complete_event(r, start_time=0):
 
@@ -107,7 +146,7 @@ def make_complete_event(r, start_time=0):
         name = r["copy_kind"]
         args = {
             "bytes": r["bytes"],
-            "MB/s": (r["bytes"] / 1e6)      / (r["wall_duration_ns"] / 1e9),
+            "MB/s": (r["bytes"] / 1e6) / (r["wall_duration_ns"] / 1e9),
             "MiB/s": (r["bytes"] / 2 ** 20) / (r["wall_duration_ns"] / 1e9),
         }
     elif kind == "activity_kernel":
@@ -146,6 +185,7 @@ def make_complete_event(r, start_time=0):
         # "tdur": dur,
     }
 
+
 import json
 
 with open('openvprof.json') as f:
@@ -169,6 +209,7 @@ trace = {
 }
 
 b = Bandwidth(start_time)
+pcie_bw = PcieBandwidth(start_time)
 
 for record in j:
     used = False
@@ -180,10 +221,12 @@ for record in j:
     if es:
         trace["traceEvents"] += es
         used = True
+    es = pcie_bw.handle(record)
+    if es:
+        trace["traceEvents"] += es
+        used = True
     if not used:
         print("didn't use record:", record)
-
-
 
 
 with open("trace.json", "w") as f:
