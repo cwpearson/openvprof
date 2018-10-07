@@ -209,6 +209,15 @@ printActivity(CUpti_Activity *record)
       }
       break;
     }
+  case CUPTI_ACTIVITY_KIND_NVLINK:
+  {
+    CUpti_ActivityNvLink2 *nvlink = (CUpti_ActivityNvLink2 *) record;
+    {
+      auto *r = new openvprof::CuptiActivityNvlinkRecord(nvlink);
+      records_->push(r);
+    }
+    break;
+  }
   case CUPTI_ACTIVITY_KIND_RUNTIME:
     {
       CUpti_ActivityAPI *api = (CUpti_ActivityAPI *) record;
@@ -315,6 +324,7 @@ openvprof::initTrace(queue<Record*> *records)
   CUPTI_CHECK(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MARKER));
   CUPTI_CHECK(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_KERNEL));
   CUPTI_CHECK(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_OVERHEAD));
+  CUPTI_CHECK(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_NVLINK));
 
   
 // enable unified memory,

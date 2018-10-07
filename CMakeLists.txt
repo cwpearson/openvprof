@@ -83,6 +83,7 @@ set(CPP_SOURCES
   src/profiler.cpp
   src/record.cpp
   src/record_writer.cpp
+  src/time.cpp
 )
 
 add_library(openvprof SHARED ${CPP_SOURCES} ${CUDA_SOURCES})
