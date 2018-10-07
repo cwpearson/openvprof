@@ -171,16 +171,18 @@ trace = {
 b = Bandwidth(start_time)
 
 for record in j:
+    used = False
     e = make_complete_event(record, start_time=start_time)
     if e:
         trace["traceEvents"] += [e]
-    else:
-        print("couldn't make event for", record)
+        used = True
     es = b.handle(record)
     if es:
         trace["traceEvents"] += es
-    else:
-        print("couldn't make event for", record)
+        used = True
+    if not used:
+        print("didn't use record:", record)
+
 
 
 
