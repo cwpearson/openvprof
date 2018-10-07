@@ -1,5 +1,80 @@
 #! python3
 
+class Bandwidth(object):
+    def __init__(self, start_time):
+        self.start_time = start_time
+        self.cpu_cpu_tracks = {}
+        self.cpu_gpu_tracks = {}
+        self.gpu_gpu_tracks = {}
+    def handle(self, record):
+        
+        kind = record.get("kind", None)
+        if kind == "activity_memcpy":
+            bandwidth = record["bytes"] / (record["wall_duration_ns"] / 1e9)
+
+            copy_kind = record["copy_kind"]
+            if copy_kind == "HtoD":
+                name = "cpu-gpu" + str(record["dev"])
+            elif copy_kind == "DtoH":
+                name = "gpu" + str(record["dev"]) + "-cpu"
+            else:
+                name = "generic"
+
+            es = []
+            es += [{
+                "pid": 'bw',
+                "name": name,
+                "ph": "C",
+                "ts": (record["wall_start_ns"] - self.start_time) / 1000,
+                "args": {
+                    "bw": bandwidth,
+                },
+            }]
+            es += [{
+                "pid": 'bw',
+                "name": name,
+                "ph": "C",
+                "ts": ((record["wall_start_ns"] + record["wall_duration_ns"]) - self.start_time) / 1000,
+                "args": {
+                    "bw": 0,
+                },
+            }]
+
+            return es
+        elif kind == "activity_unified_memory_counter":
+            counter_kind = record["counter_kind"]
+            bandwidth = record["value"] / (record["wall_duration_ns"] / 1e9)
+            if counter_kind == "BYTES_TRANSFER_DTOH":
+                name = "gpu" + str(record["src_id"]) + "-cpu" 
+            elif counter_kind == "BYTES_TRANSFER_HTOD":
+                name = "cpu-gpu" + str(record["dst_id"])
+            else:
+                return None
+
+            es = []
+            es += [{
+                "pid": 'bw',
+                "name": name,
+                "ph": "C",
+                "ts": (record["wall_start_ns"] - self.start_time) / 1000,
+                "args": {
+                    "bw": bandwidth,
+                },
+            }]
+            es += [{
+                "pid": 'bw',
+                "name": name,
+                "ph": "C",
+                "ts": ((record["wall_start_ns"] + record["wall_duration_ns"]) - self.start_time) / 1000,
+                "args": {
+                    "bw": 0,
+                },
+            }]
+            return es
+
+
+        return None
+
 def make_complete_event(r, start_time=0):
 
     kind = r.get("kind", None)
@@ -67,7 +142,8 @@ def make_complete_event(r, start_time=0):
         "tid": tid,
         "ts": start,
         "dur": dur,
-        "args": args
+        "args": args,
+        # "tdur": dur,
     }
 
 import json
@@ -92,10 +168,17 @@ trace = {
     "displayTimeUnit": "ns",
 }
 
+b = Bandwidth(start_time)
+
 for record in j:
     e = make_complete_event(record, start_time=start_time)
     if e:
         trace["traceEvents"] += [e]
+    else:
+        print("couldn't make event for", record)
+    es = b.handle(record)
+    if es:
+        trace["traceEvents"] += es
     else:
         print("couldn't make event for", record)
 

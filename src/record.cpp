@@ -99,6 +99,7 @@ json CuptiActivityMemcpyRecord::to_json() const{
         {COPY_KIND, getMemcpyKindString(static_cast<CUpti_ActivityMemcpyKind>(memcpy_.copyKind))},
         {SRC_KIND,  getMemoryKindString(static_cast<CUpti_ActivityMemoryKind>(memcpy_.srcKind))},
         {DST_KIND,  getMemoryKindString(static_cast<CUpti_ActivityMemoryKind>(memcpy_.dstKind))},
+        {DEVICE_ID, memcpy_.deviceId},
     };
 }
 

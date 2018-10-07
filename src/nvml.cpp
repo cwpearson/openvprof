@@ -75,6 +75,9 @@ void Poller::start()
             { // device or link is invalid
                 continue;
             }
+            else if (NVML_ERROR_NOT_SUPPORTED) {
+                continue;
+            }
             NVML_CHECK(result);
             if (isActive == NVML_FEATURE_ENABLED)
             {
