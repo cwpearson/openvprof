@@ -231,6 +231,46 @@ void Poller::run()
             
         }
 
+        // READ some PCIe traffic
+
+        LOG(trace, "nvml polling PCIe counters");
+        for (size_t devIdx = 0; devIdx < devices_.size(); ++devIdx)
+        {
+            auto dev = devices_[devIdx];
+            unsigned int kb;
+            auto start = now();
+            NVML_CHECK(nvmlDeviceGetPcieThroughput (dev, NVML_PCIE_UTIL_TX_BYTES, &kb)); 
+            auto stop = now();
+
+            {
+                auto *r = new NvmlPcieThroughputRecord(
+                    start,
+                    stop,
+                    devIdx,
+                    kb,
+                    true // tx
+                );
+                records_->push(r);
+            }
+
+            start = now();
+            NVML_CHECK(nvmlDeviceGetPcieThroughput (dev, NVML_PCIE_UTIL_RX_BYTES, &kb)); 
+            stop = now();
+
+            {
+                auto *r = new NvmlPcieThroughputRecord(
+                    start,
+                    stop,
+                    devIdx,
+                    kb,
+                    false // rx
+                );
+                records_->push(r);
+            }
+
+        }
+
+
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }

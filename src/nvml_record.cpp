@@ -24,6 +24,19 @@ json NvmlNvlinkUtilizationCounterRecord::to_json() const {
       {DEVICE_ID, dev_},
       {LINK_ID, link_},
       {COUNTER_ID, counter_id_},
+      {COUNTER_KIND, tx_ ? "tx" : "rx"},
+  };
+}
+
+json NvmlPcieThroughputRecord::to_json() const {
+  
+  return json{
+      {KIND, "pcie_throughput"},
+      {WALL_START_NS, ns_since_epoch(start_)},
+      {WALL_DURATION_NS, duration_cast<nanoseconds>(stop_-start_).count()},
+      {KBYTES, kbytes_},
+      {DEVICE_ID, dev_},
+      {COUNTER_KIND, tx_ ? "tx" : "rx"},
   };
 }
 
