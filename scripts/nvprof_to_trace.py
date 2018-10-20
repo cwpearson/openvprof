@@ -8,12 +8,15 @@ from math import log
 import logging
 import time
 
+import cmd.summary
 
+logger = logging.getLogger(__name__)
 
 def table_size(cursor, table_name):
     cursor.execute('SELECT Count(*) FROM {}'.format(table_name))
     row = cursor.fetchone()
     return row[0]
+
 
 class Histogram(object):
     def __init__(self, lower=None, upper=None):
@@ -207,6 +210,7 @@ def timeline(filename, _from, to):
 cli.add_command(timeline)
 cli.add_command(driver_time)
 cli.add_command(kernel_time)
+cli.add_command(cmd.summary.summary)
 
 if __name__ == '__main__':
     cli()
