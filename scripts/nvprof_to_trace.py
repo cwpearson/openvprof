@@ -5,62 +5,15 @@ import sys
 import json
 import click
 from math import log
+import logging
 import time
+
+
 
 def table_size(cursor, table_name):
     cursor.execute('SELECT Count(*) FROM {}'.format(table_name))
     row = cursor.fetchone()
     return row[0]
-
-def onelineplot( x, chars=u"▁▂▃▄▅▆▇█", sep=" " ):
-    """ numbers -> v simple one-line plots like
-
-f ▆ ▁ ▁ ▁ █ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁  osc 47  ▄ ▁ █ ▇ ▄ ▆ ▅ ▇ ▇ ▇ ▇ ▇ ▄ ▃ ▃ ▁ ▃ ▂  rosenbrock
-f █ ▅ █ ▅ █ ▅ █ ▅ █ ▅ █ ▅ █ ▅ █ ▅ ▁ ▁ ▁ ▁  osc 58  ▂ ▁ ▃ ▂ ▄ ▃ ▅ ▄ ▆ ▅ ▇ ▆ █ ▇ ▇ ▃ ▃ ▇  rastrigin
-f █ █ █ █ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁ ▁  osc 90  █ ▇ ▇ ▁ █ ▇ █ ▇ █ ▇ █ ▇ █ ▇ █ ▇ █ ▇  ackley
-
-Usage:
-    astring = onelineplot( numbers [optional chars= sep= ])
-In:
-    x: a list / tuple / numpy 1d array of numbers
-    chars: plot characters, default the 8 Unicode bars above
-    sep: "" or " " between plot chars
-
-How it works:
-    linscale x  ->  ints 0 1 2 3 ...  ->  chars ▁ ▂ ▃ ▄ ...
-
-See also: https://github.com/RedKrieg/pysparklines
-    """
-
-    xlin = _linscale( x, to=[-.49, len(chars) - 1 + .49 ])
-        # or quartiles 0 - 25 - 50 - 75 - 100
-    xints = xlin.round().astype(int)
-    assert xints.ndim == 1, xints.shape  # todo: 2d
-    return sep.join([ chars[j] for j in xints ])
-
-def histo(data, lower=None, upper=None):
-
-    bins = {}
-
-    if lower:
-        lower_bound = int(math.log(lower))
-    if upper:
-        upper_bound = int(math.log(upper))
-
-    bins = []
-    for e in data:
-        l = int(math.log(e, 2))
-        if lower:
-            if l < lower_bound:
-                l = lower_bound
-        if upper:
-            if l > upper_bound:
-                l = upper_bound
-        if l not in bins:
-            bins[l] = 0
-        bins[l] += 1
-
-    return []
 
 class Histogram(object):
     def __init__(self, lower=None, upper=None):
@@ -118,15 +71,25 @@ def spark(x, log=False):
     return "".join([chars[i] for i in ids])
 
 @click.group()
-def cli():
-    pass
+@click.option('--debug', is_flag=True, help="print debugging messages")
+@click.pass_context
+def cli(ctx, debug):
+    logging.basicConfig()
+    ctx.ensure_object(dict)
+    ctx.obj["DEBUG"] = debug
+    if debug:
+        logging.getLogger().setLevel(logging.DEBUG)
 
 @click.command()
 @click.argument('filename')
-def driver_time(filename):
+@click.pass_context
+def driver_time(ctx, filename):
+    """Show a histogram of driver API times"""
+    logging.debug("Opening {}".format(filename))
     conn = sqlite3.connect(filename)
     c = conn.cursor()
-    print("CUPTI_ACTIVITY_KIND_DRIVER has {} entries".format(table_size(c, 'CUPTI_ACTIVITY_KIND_DRIVER')), file=sys.stderr)
+    if ctx.obj["DEBUG"]:
+        logging.debug("table CUPTI_ACTIVITY_KIND_DRIVER has {} entries".format(table_size(c, 'CUPTI_ACTIVITY_KIND_DRIVER')))
 
     first = None
     last = None
@@ -143,7 +106,8 @@ def driver_time(filename):
         histo.insert(end_ns - start_ns)
     # print("First event start: {}".format(  time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(first//1e9))  ))
     # print("Last event end: {}".format(  time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last//1e9))  ))
-    print("Elapsed: {}s".format( (last-first)/1e9 )) # time between first and last event
+    logging.debug("first event timestamp {}ns".format(first))
+    logging.debug("last event timestamp {}ns".format(last))
     histo, lower, upper = histo.get()
     print("Durations: 2^{} {} 2^{}".format(lower, spark(histo), upper))
     
@@ -151,10 +115,14 @@ def driver_time(filename):
 @click.command()
 @click.argument('filename')
 @click.option('--scale', type=click.Choice(['lin', 'log']), default='lin', show_default=True)
-def kernel_time(filename, scale):
+@click.pass_context
+def kernel_time(ctx, filename, scale):
+    """Show a histogram of kernel times (ns)"""
+    logging.debug("Opening {}".format(filename))
     conn = sqlite3.connect(filename)
     c = conn.cursor()
-    print("CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL has {} entries".format(table_size(c, 'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL')), file=sys.stderr)
+    if ctx.obj["DEBUG"]:
+        logging.debug("table CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL has {} entries".format(table_size(c, 'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL')))
 
     first = None
     last = None
@@ -169,85 +137,76 @@ def kernel_time(filename, scale):
         first = min(first, start_ns)
         last = max(last, start_ns)
         histo.insert(end_ns - start_ns)
-    # print("First event start: {}".format(  time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(first//1e9))  ))
-    # print("Last event end: {}".format(  time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last//1e9))  ))
-    print("Elapsed: {}s".format( (last-first)/1e9 )) # time between first and last event
     histo, lower, upper = histo.get()
+    logging.debug("lower bound is {}".format(lower))
+    logging.debug("upper bound is {}".format(upper))
+    logging.debug("histogram data: {}".format(histo))
     if scale == "lin":
+        logging.debug("Using linear y-axis scale")
         sparkstring = spark(histo, log=False)
     else:
+        logging.debug("Using logarithmic y-axis scale")
         sparkstring = spark(histo, log=True)
     print("Durations: 2^{} {} 2^{}".format(lower, sparkstring, upper))
 
+@click.command()
+@click.argument('filename')
+@click.option('--to')
+@click.option('--from', '_from')
+def timeline(filename, _from, to):
+    """Generate a chrome:://tracing timeline"""
 
+    conn = sqlite3.connect(filename)
+    c = conn.cursor()
+
+    if to:
+        try:
+            to = float(to)
+        except ValueError:
+            print("to should be a float", file=sys.stderr)
+            sys.exit(-1)
+    
+    if _from:
+        try:
+            _from = float(_from)
+        except ValueError:
+            print("from should be a float", file=sys.stderr)
+            sys.exit(-1)
+
+    trace = {
+        "traceEvents": [],
+        "displayTimeUnit": "ns",
+    }
+
+    # add KERNELS to timeline
+    for row in c.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL"):
+        start_ns = row[6]
+        end_ns = row[7]
+        if _from and start_ns < _from:
+            continue
+        if to and end_ns > to:
+            continue
+        j = {
+            "name": "name",
+            "cat": "cat",
+            "ph": "X",
+            "pid": "CONCURRENT_KERNEL",
+            "tid": "tid",
+            "ts": start_ns // 1000,
+            "dur": (end_ns - start_ns) // 1000,        
+            "args": {},
+            # "tdur": dur,
+        }
+        trace["traceEvents"] += [j]
+
+
+    s = json.dumps(trace, indent=4)
+    print(s)
+
+
+cli.add_command(timeline)
 cli.add_command(driver_time)
 cli.add_command(kernel_time)
 
 if __name__ == '__main__':
     cli()
-
-"""
-
-
-
-for row in c.execute('PRAGMA table_info(CUPTI_ACTIVITY_KIND_DRIVER)'):
-    print(row, file=sys.stderr)
-
-print("CUPTI_ACTIVITY_KIND_DRIVER has {} entries".format(table_size(c, 'CUPTI_ACTIVITY_KIND_DRIVER')), file=sys.stderr)
-print("CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL has {} entries".format(table_size(c, 'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL')), file=sys.stderr)
-
-sys.exit()
-
-cupti_activity_driver_start = None
-
-for row in c.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_DRIVER"):
-    start_ns = row[3]
-    if not cupti_activity_driver_start:
-        cupti_activity_driver_start = start_ns
-    cupti_activity_driver_start = min(cupti_activity_driver_start, start_ns)
-
-
-trace = {
-    "traceEvents": [],
-    "displayTimeUnit": "ns",
-}
-
-# add driver events
-
-for row in c.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_DRIVER"):
-    start_ns = row[3]
-    dur_ns = row[4] - row[3]
-
-    j = {
-        "name": "name",
-        "cat": "cat",
-        "ph": "X",
-        "pid": "pid",
-        "tid": "tid",
-        "ts": start_ns // 1000,
-        "dur": dur_ns // 1000,        "args": {},
-        # "tdur": dur,
-    }
-    trace["traceEvents"] += [j]
-
-# add concurrent kernels to timeline
-for row in c.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL"):
-    start_ns = row[3]
-    dur_ns = row[4] - row[3]
-
-    j = {
-        "name": "name",
-        "cat": "cat",
-        "ph": "X",
-        "pid": "pid",
-        "tid": "tid",
-        "ts": start_ns // 1000,
-        "dur": dur_ns // 1000,
-        "args": {},
-        # "tdur": dur,
-    }
-    trace["traceEvents"] += [j]
-
-s = json.dumps(trace, indent=4)
-print(s)
-"""
