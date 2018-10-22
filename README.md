@@ -51,3 +51,18 @@ Visualizing:
 - [ ] logical link traffic visualization
 - [ ] physical link traffic visualization
 - [ ] Split or combine different transfer directions on same link
+
+## scripts / nvprof_to_trace.py
+
+Analsys of files generated from nvprof
+
+- [ ] Basic Kernel Stats
+  - [ ] Histogram run times
+    - [x] Overall histogram
+    - [ ] per-device histogram
+  - [ ] Occupancy over entire execution profile
+  - [ ] Occupancy over kernel executions
+- [ ] Basic transfer times stats
+  - [x] Overall transfer times stats
+- [ ] Activity Overlap
+  - [x] Divide into fixed-size bins, per-bin expected overlap
