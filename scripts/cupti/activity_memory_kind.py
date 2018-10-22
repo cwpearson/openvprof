@@ -1,0 +1,10 @@
+# https://docs.nvidia.com/cuda/cupti/index.html#group__CUPTI__ACTIVITY__API_1g9969b86f0e54989b27080dc6083263bc
+
+UNKNOWN = 0
+PAGEABLE = 1
+PINNED = 2
+DEVICE = 3
+ARRAY = 4
+MANAGED = 5
+DEVICE_STATIC = 6
+MANAGED_STATIC = 7
