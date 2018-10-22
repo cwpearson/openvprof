@@ -19,8 +19,6 @@ Run a CUDA program and produce an output record `openvprof.json`
 LD_PRELOAD=libopenvprof.so ./my-exe
 ```
 
-Unlike the files produced by nvprof, you can read and parse this one easily.
-
 ### Options
 
 * `OPENVPROF_LOG_LEVEL`: `trace`, `debug`, `info`, `warn`, `err`, `crit`
