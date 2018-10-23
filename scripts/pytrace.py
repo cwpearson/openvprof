@@ -2,6 +2,9 @@ import sys
 import os
 import time
 
+from ctypes import cdll
+import ctypes
+
 # https://docs.python.org/2/library/sys.html#sys.setprofile
 # https://docs.python.org/2/library/inspect.html
 
@@ -22,6 +25,36 @@ else:
         threading.setprofile(None)
 
 
+# load the nvToolsExt library
+
+lib = None
+for path in [
+    'libnvToolsExt.dylib',
+    '/usr/local/cuda/lib/libnvToolsExt.dylib',
+    'libnvToolsExt.so',
+    '/usr/local/cuda/lib/libnvToolsExt.so',
+]:
+    try:
+        lib = cdll.LoadLibrary(path)
+    except OSError as e:
+        print("unable to load {}: {}".format(path, e), file=sys.stderr)
+        lib = None
+    else:
+        print("loaded {}".format(path), file=sys.stderr)
+    if lib:
+        break
+
+
+def _nvtxRangePush(s):
+    if lib:
+        lib.nvtxRangePushA(ctypes.c_char_p(str.encode(s)))
+
+
+def _nvtxRangePop():
+    if lib:
+        lib.nvtxRangePop()
+
+
 records = []
 
 
@@ -30,9 +63,11 @@ def tracefunc(frame, event, arg):
     hs = hash(frame)
     if event == "call":
         records.append(('call', frame.f_code.co_name, ts, hs))
+        _nvtxRangePush("test")
         # print("-" * indent[0] + "> call function",
         #       frame.f_code.co_name, int(time.time() * 1e9), hash(frame))
     elif event == "return":
+        _nvtxRangePop()
         records.append(('exit', frame.f_code.co_name, ts, hs))
         # print("<" + "-" * indent[0], "exit function",
         #       frame.f_code.co_name, int(time.time() * 1e9), hash(frame))
