@@ -19,8 +19,6 @@ Run a CUDA program and produce an output record `openvprof.json`
 LD_PRELOAD=libopenvprof.so ./my-exe
 ```
 
-Unlike the files produced by nvprof, you can read and parse this one easily.
-
 ### Options
 
 * `OPENVPROF_LOG_LEVEL`: `trace`, `debug`, `info`, `warn`, `err`, `crit`
@@ -51,3 +49,18 @@ Visualizing:
 - [ ] logical link traffic visualization
 - [ ] physical link traffic visualization
 - [ ] Split or combine different transfer directions on same link
+
+## scripts / nvprof_to_trace.py
+
+Analsys of files generated from nvprof
+
+- [ ] Basic Kernel Stats
+  - [ ] Histogram run times
+    - [x] Overall histogram
+    - [ ] per-device histogram
+  - [ ] Occupancy over entire execution profile
+  - [ ] Occupancy over kernel executions
+- [ ] Basic transfer times stats
+  - [x] Overall transfer times stats
+- [ ] Activity Overlap
+  - [x] Divide into fixed-size bins, per-bin expected overlap
