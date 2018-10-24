@@ -13,7 +13,10 @@ A python wrapper for adding Nvidia Tools Extension ranges for python functions t
 ### Add to a Docker image
 
 ```docker
-RUN apt-get update && apt-get install python3
+RUN mkdir /opt/openvprof \
+ && curl -SL -o /opt/openvprof/pynvtx.py https://raw.githubusercontent.com/cwpearson/openvprof/master/scripts/pynvtx.py \
+ && chmod +x /opt/openvprof/pynvtx.py
+ENV PATH /opt/openvprof:$PATH
 ```
 
 ### Build/Run a docker image
