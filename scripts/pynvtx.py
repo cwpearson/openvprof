@@ -5,6 +5,8 @@ import os
 import time
 import logging
 import ctypes
+import inspect
+import traceback
 
 logging.basicConfig()
 logger = logging.getLogger("pynvtx")
@@ -67,16 +69,44 @@ else:
     def _nvtxRangePop(): pass
 
 
+def get_static_class(frame):
+    """return the class name of a call frame in a static method"""
+    # look in the parent stack frame for a line of code that looks like a static method definition, and use that if found
+    function_name = frame.f_code.co_name
+    stack_summary = traceback.extract_stack(frame)
+    line = stack_summary[-2][3]
+    class_end_idx = line.find("."+function_name+"(")
+    if class_end_idx == -1:
+        class_name = None
+    else:
+        class_name = line[0:class_end_idx]
+    return class_name
+
+
+def get_method_class(frame):
+    """return the class name of 'self', or None"""
+    # check the class of the self variable if it exists
+    try:
+        class_name = frame.f_locals['self'].__class__.__name__
+    except KeyError:
+        class_name = None
+    return class_name
+
+
 def tracefunc(frame, event, arg, depth=[0]):
     if event == "call":
         depth[0] += 1
         if DEPTH_LIMIT and depth[0] > DEPTH_LIMIT:
             return tracefunc
-        name = frame.f_code.co_name
+        function_name = frame.f_code.co_name
+        file_name = frame.f_code.co_filename
         # don't record call of _unsettrace (won't see exit)
-        if name == "_unsettrace":
+        if function_name == "_unsettrace":
             return tracefunc
-        _nvtxRangePush(frame.f_code.co_name)
+        #filename, lineno, function, code_context, index = inspect.getframeinfo(frame)
+        range_name = file_name + "::" + function_name
+        # logger.debug(range_name)
+        _nvtxRangePush(range_name)
     elif event == "return":
         frame_depth = depth[0]
         depth[0] -= 1
