@@ -3,9 +3,13 @@
 import sys
 import os
 import time
-
-from ctypes import cdll
+import logging
 import ctypes
+
+logging.basicConfig()
+logger = logging.getLogger("pynvtx")
+logger.setLevel(logging.DEBUG)
+
 
 # https://docs.python.org/2/library/sys.html#sys.setprofile
 # https://docs.python.org/2/library/inspect.html
@@ -28,51 +32,53 @@ else:
 
 
 # load the nvToolsExt library
+NVTOOLSEXT_PATHS = [
+    'libnvToolsExt.dylib',
+    'libnvToolsExt.so',
+    '/usr/local/cuda/lib/libnvToolsExt.dylib',
+    '/usr/local/cuda/lib/libnvToolsExt.so',
+]
+
 
 lib = None
-for path in [
-    'libnvToolsExt.dylib',
-    '/usr/local/cuda/lib/libnvToolsExt.dylib',
-    'libnvToolsExt.so',
-    '/usr/local/cuda/lib/libnvToolsExt.so',
-]:
+for path in NVTOOLSEXT_PATHS:
     try:
-        lib = cdll.LoadLibrary(path)
+        lib = ctypes.cdll.LoadLibrary(path)
     except OSError as e:
-        print("unable to load {}: {}".format(path, e), file=sys.stderr)
+        logger.debug(
+            "failed to load Nvidia Tools Extensions from {}".format(path))
         lib = None
     else:
-        print("loaded {}".format(path), file=sys.stderr)
-    if lib:
+        logger.info("loaded Nvidia Tools Extensions from {}".format(path))
         break
 
-
-def _nvtxRangePush(s):
-    if lib:
+if lib:
+    def _nvtxRangePush(s):
         lib.nvtxRangePushA(ctypes.c_char_p(str.encode(s)))
 
-
-def _nvtxRangePop():
-    if lib:
+    def _nvtxRangePop():
         lib.nvtxRangePop()
+else:
+    logger.error("couldn't load any of {}".format(NVTOOLSEXT_PATHS))
 
+    def _nvtxRangePush(_): pass
 
-records = []
+    def _nvtxRangePop(): pass
 
 
 def tracefunc(frame, event, arg):
-    ts = time.time()
-    hs = hash(frame)
     if event == "call":
-        records.append(('call', frame.f_code.co_name, ts, hs))
-        _nvtxRangePush("test")
-        # print("-" * indent[0] + "> call function",
-        #       frame.f_code.co_name, int(time.time() * 1e9), hash(frame))
+        name = frame.f_code.co_name
+        # don't record call of _unsettrace (won't see exit)
+        if name == "_unsettrace":
+            return tracefunc
+        _nvtxRangePush(frame.f_code.co_name)
     elif event == "return":
+        name = frame.f_code.co_name
+        # don't record exit of _settrace (won't see call)
+        if name == "_settrace":
+            return tracefunc
         _nvtxRangePop()
-        records.append(('exit', frame.f_code.co_name, ts, hs))
-        # print("<" + "-" * indent[0], "exit function",
-        #       frame.f_code.co_name, int(time.time() * 1e9), hash(frame))
     return tracefunc
 
 
@@ -86,11 +92,6 @@ def runctx(cmd, globals=None, locals=None):
         exec(cmd, globals, locals)
     finally:
         _unsettrace()
-
-
-def _err_exit(msg):
-    sys.stderr.write("%s: %s\n" % (sys.argv[0], msg))
-    sys.exit(1)
 
 
 def main():
@@ -111,13 +112,11 @@ def main():
             }
             runctx(code, globs, globs)
     except IOError as err:
-        _err_exit("Cannot run file %r because: %s" % (sys.argv[0], err))
+        logger.critical(
+            "Cannot add nvToolsExt ranges to python file %r because: %s" % (sys.argv[0], err))
+        sys.exit(1)
     except SystemExit:
         pass
-
-    with open('pytrace.csv', 'w') as fp:
-        for r in records:
-            fp.write(",".join([str(e) for e in r])+'\n')
 
 
 if __name__ == '__main__':
