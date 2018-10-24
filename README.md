@@ -16,6 +16,11 @@ A python wrapper for adding Nvidia Tools Extension ranges for python functions t
 RUN apt-get update && apt-get install python3
 ```
 
+### Build/Run a docker image
+
+docker build -f ppc64le.Dockerfile -t openvprof/ppc64le .
+docker run -v `pwd`/container:/host -it openvprof/ppc64le
+
 #### Options
 
 `--depth DEPTH`: only record ranges to this stack dept
