@@ -1,8 +1,31 @@
-# openvprof
+# openvprof Project
 
-An open version of `nvprof` and `nvvp`.
+A collection of profiling tools, inspired by challenges in profiling large CUDA applications using `nvprof` and `nvvp`.
 
-## Building
+## scripts/pynvtx.py
+
+A python wrapper for adding Nvidia Tools Extension ranges for python functions to `nvprof` profiles.
+
+### Run Natively
+
+`nvprof pynvtx.py <your python script and args>`
+
+### Add to a Docker image
+
+```docker
+RUN apt-get update && apt-get install python3
+```
+
+#### Options
+
+`--depth DEPTH`: only record ranges to this stack dept
+`--verbose` / `--debug` print verbose information / print debug messages
+
+## openvprof
+
+An open profiler using CuPTI and Nvidia Management Library
+
+### Building
 
 ```bash
 mkdir build
@@ -11,7 +34,7 @@ cmake ..
 make
 ```
 
-## Recording
+### Recording
 
 Run a CUDA program and produce an output record `openvprof.json`
 
@@ -19,12 +42,12 @@ Run a CUDA program and produce an output record `openvprof.json`
 LD_PRELOAD=libopenvprof.so ./my-exe
 ```
 
-### Options
+#### Options
 
 * `OPENVPROF_LOG_LEVEL`: `trace`, `debug`, `info`, `warn`, `err`, `crit`
 * `OPENVPROF_OUTPUT_PATH`: control the output path that can be loaded into chrome://tracing
 
-## Visualizing
+### Visualizing
 
 Convert `openvprof.json` to `trace.json`
 
@@ -35,7 +58,7 @@ python3 scrips/trace.py
 Open Chromium or Chrome to `chrome://tracing` and load `trace.json`
 
 
-## Features
+### Features
 
 Recording:
 
