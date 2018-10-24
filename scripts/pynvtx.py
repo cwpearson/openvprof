@@ -8,8 +8,9 @@ import ctypes
 
 logging.basicConfig()
 logger = logging.getLogger("pynvtx")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.WARN)
 
+DEPTH_LIMIT = None
 
 # https://docs.python.org/2/library/sys.html#sys.setprofile
 # https://docs.python.org/2/library/inspect.html
@@ -66,14 +67,21 @@ else:
     def _nvtxRangePop(): pass
 
 
-def tracefunc(frame, event, arg):
+def tracefunc(frame, event, arg, depth=[0]):
     if event == "call":
+        depth[0] += 1
+        if DEPTH_LIMIT and depth[0] > DEPTH_LIMIT:
+            return tracefunc
         name = frame.f_code.co_name
         # don't record call of _unsettrace (won't see exit)
         if name == "_unsettrace":
             return tracefunc
         _nvtxRangePush(frame.f_code.co_name)
     elif event == "return":
+        frame_depth = depth[0]
+        depth[0] -= 1
+        if DEPTH_LIMIT and depth[0] > DEPTH_LIMIT:
+            return tracefunc
         name = frame.f_code.co_name
         # don't record exit of _settrace (won't see call)
         if name == "_settrace":
@@ -95,7 +103,33 @@ def runctx(cmd, globals=None, locals=None):
 
 
 def main():
-    prog_argv = sys.argv[1:]
+
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Add Nvidia Tools Extensions ranges to python functions')
+    parser.add_argument('--depth', type=int,
+                        help='only push ranges to this stack depth')
+    parser.add_argument('--debug', action='store_true',
+                        help='print debug messages')
+    parser.add_argument('--verbose', action='store_true',
+                        help='print verbose messages')
+    parser.add_argument('commands', nargs='+', help='commands help')
+
+    args = parser.parse_args()
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+    if args.verbose:
+        logger.setLevel(logging.INFO)
+    if args.depth:
+        if args.depth < 0:
+            logger.critical('trace depth must be >=0')
+            sys.exit(1)
+        else:
+            DEPTH_LIMIT = args.depth
+
+    prog_argv = args.commands
+    logger.debug("Tracing python argv[:] {}".format(prog_argv))
     sys.argv = prog_argv
     progname = prog_argv[0]
     sys.path[0] = os.path.split(progname)[0]
