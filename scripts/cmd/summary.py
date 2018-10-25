@@ -2,8 +2,10 @@ import click
 import sqlite3
 import logging
 import sys
+from math import ceil
 
 import cupti.activity_memory_kind
+from nvprof import Db
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +31,31 @@ def table_time_extent(cursor, table_name):
         'start', 'end', table_name))
     row = cursor.fetchone()
     begin = min(row[0], row[2]) if row[0] and row[2] else None
-    end = min(row[1], row[3]) if row[1] and row[3] else None
+    end = max(row[1], row[3]) if row[1] and row[3] else None
     return begin, end
+
+
+class Span(object):
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+
+    def contains(self, v):
+        return v >= self.start and v < self.end
+
+    def overlaps(self, other):
+        return self.contains(other.start) or other.contains(self.start)
+
+    def __str__(self):
+        return "Span[" + str(self.start) + ", " + str(self.end) + ")"
+
+
+assert Span(1, 2).overlaps(Span(1.5, 2.5))
+assert Span(1, 2).overlaps(Span(0, 3))
+assert not Span(1, 2).overlaps(Span(3, 4))
+assert not Span(1, 2).overlaps(Span(2, 3))
+assert not Span(1, 2).overlaps(Span(0, 1))
+assert Span(2, 3).overlaps(Span(2, 3))
 
 
 class Segments(object):
@@ -114,10 +139,15 @@ class ApproxTimeline(object):
     def __init__(self, begin_time, end_time):
         self.begin_time = begin_time
         self.end_time = end_time
-        self.num_segments = 1_000_000
-        self.segment_extent = (
-            self.end_time - self.begin_time) // self.num_segments
-        self.num_segments += 1
+        self.num_segments = 1_000_000  # use no more than this many segments
+        real_segment_extent = (
+            self.end_time - self.begin_time) / self.num_segments
+        self.segment_extent = int(ceil(real_segment_extent))
+        self.num_segments = int((
+            self.end_time - self.begin_time) / float(self.segment_extent)) + 1
+
+        assert(self.begin_time + self.num_segments *
+               self.segment_extent >= self.end_time)
         self.gpu_kernel_tracks = {}
         self.comm_tracks = {}
 
@@ -125,10 +155,10 @@ class ApproxTimeline(object):
         return Segments(self.num_segments)
 
     def get_segment_id(self, timestamp):
-        span_id = int((timestamp - self.begin_time) // self.segment_extent)
-        assert span_id >= 0
-        assert span_id < self.num_segments
-        return span_id
+        segment_id = int((timestamp - self.begin_time) // self.segment_extent)
+        assert segment_id >= 0
+        assert segment_id < self.num_segments
+        return segment_id
 
     def add_span(self, track, start, end):
         # get the track and the segment ids that the span starts and stops in
@@ -170,10 +200,49 @@ class ApproxTimeline(object):
         self.add_span(self.comm_tracks[track_id], start, end)
 
 
+def filter_spans(sources, filters):
+    """return only spans from sources that overlap with at least one span in filters"""
+    if len(filters) == 0:
+        return sources
+    filtered = []
+    for span in sources:
+        if any(span.overlaps(f) for f in filters):
+            filtered += [span]
+    return filtered
+
+
 @click.command()
 @click.argument('filename')
+@click.option('-r', '--range-name', multiple=True, help='only consider activity that overlaps with nvToolsExt ranges with this name')
 @click.pass_context
-def summary(ctx, filename):
+def summary(ctx, filename, range_name):
+
+    logging.debug("restricting to nvtx ranges: {}".format(
+        ", ".join(range_name)))
+
+    db = Db(filename)
+
+    logger.debug("Loading strings")
+    nvprof_id_to_string, nvprof_string_to_id = db.get_strings()
+
+    filters = set()
+    logger.debug("Loading ranges to look for matching spans")
+    for row in db.execute("select id, Max(name), Min(timestamp), Max(timestamp) from CUPTI_ACTIVITY_KIND_MARKER group by id"):
+        id_ = row[0]
+        name_idx = row[1]
+        name = nvprof_id_to_string[name_idx]
+        start = row[2]
+        end = row[3]
+        if name in range_name:
+            filters.add(Span(start, end))
+    logger.debug("Found {} ranges matching at least one of {}".format(
+        len(filters), range_name))
+
+    # get timespans from batches of ranges
+    # build a script with those timespans
+    # select only matching rows from other tables
+    # for row in db.rows('CUPTI_ACTIVITY_KIND_MARKER'):
+    #     pass
 
     logging.debug("Opening {}".format(filename))
     conn = sqlite3.connect(filename)
@@ -190,7 +259,7 @@ def summary(ctx, filename):
     ends = []
     for table_name in search_tables:
         if table_exists(c, table_name):
-            logging.debug("Counting rows in {}".format(table_name))
+            logger.debug("Getting timestamp extent for {}".format(table_name))
             begin, end = table_time_extent(c, table_name)
             if begin and end:
                 logger.debug("{}: has events from {} to {}".format(
@@ -203,25 +272,28 @@ def summary(ctx, filename):
     logger.debug("Paritioning time between {} and {} = {}".format(
         begin, end, end-begin))
 
-    target_num_spans = 1_000_000
-    span_size = (end-begin) // target_num_spans
-    logger.debug(
-        "targeting {} spans -> span size: {}".format(target_num_spans, span_size))
     AT = ApproxTimeline(begin, end)
 
     logger.debug("reading table CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL...")
-    for row in c.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL"):
+    for row in db.rows('CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL'):
         start_ns = row[6]
         end_ns = row[7]
         gpu_id = row[9]
-        AT.add_gpu_span(gpu_id, start_ns, end_ns)
+        s = Span(start_ns, end_ns)
+        s = filter_spans([s], filters)
+        if s:
+            print(s[0], "overlaps", [str(f) for f in filters])
+            AT.add_gpu_span(gpu_id, start_ns, end_ns)
 
     logger.debug("reading table CUPTI_ACTIVITY_KIND_KERNEL...")
     for row in c.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_KERNEL"):
         start_ns = row[6]
         end_ns = row[7]
         gpu_id = row[9]
-        AT.add_gpu_span(gpu_id, start_ns, end_ns)
+        s = Span(start_ns, end_ns)
+        s = filter_spans([s], filters)
+        if s:
+            AT.add_gpu_span(gpu_id, start_ns, end_ns)
 
     logger.debug("reading table CUPTI_ACTIVITY_KIND_MEMCPY...")
     for row in c.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_MEMCPY"):
@@ -238,7 +310,10 @@ def summary(ctx, filename):
             dst_tag = 'gpu' + str(device_id)
         else:
             dst_tag = 'cpu'
-        AT.add_comm_span(src_tag, dst_tag, start_ns, end_ns)
+        s = Span(start_ns, end_ns)
+        s = filter_spans([s], filters)
+        if s:
+            AT.add_comm_span(src_tag, dst_tag, start_ns, end_ns)
 
     logger.debug("reading table CUPTI_ACTIVITY_KIND_MEMCPY2...")
     for row in c.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_MEMCPY2"):
@@ -248,12 +323,15 @@ def summary(ctx, filename):
         dst_gpu = row[13]
         src_tag = 'gpu' + str(src_gpu)
         dst_tag = 'gpu' + str(dst_gpu)
-        AT.add_comm_span(src_tag, dst_tag, start_ns, end_ns)
+        s = Span(start_ns, end_ns)
+        s = filter_spans([s], filters)
+        if s:
+            AT.add_comm_span(src_tag, dst_tag, start_ns, end_ns)
 
     for gpu_id in AT.gpu_kernel_tracks:
         track = AT.gpu_kernel_tracks[gpu_id]
         pfx = "kernels::{}: ".format(gpu_id)
-        print(pfx + " ({})".format(track.num_spans()))
+        print(pfx + " number of spans = {}".format(track.num_spans()))
         mi, ma, av = track.converage_stats()
         print(pfx + " avg coverage = {}".format(av))
         print(pfx + " min coverage = {}".format(mi))
@@ -265,7 +343,7 @@ def summary(ctx, filename):
     for comm_id in AT.comm_tracks:
         track = AT.comm_tracks[comm_id]
         pfx = "comm::{}: ".format(comm_id)
-        print(pfx + " ({})".format(track.num_spans()))
+        print(pfx + " number of spans = {}".format(track.num_spans()))
         mi, ma, av = track.converage_stats()
         print(pfx + " avg coverage = {}".format(av))
         print(pfx + " min coverage = {}".format(mi))
@@ -274,22 +352,3 @@ def summary(ctx, filename):
         print(pfx + " avg density = {}".format(av))
         print(pfx + " min density = {}".format(mi))
         print(pfx + " max density = {}".format(ma))
-
-    # create a new track with comm/kernel overlap
-
-    # span_coverage = [1.0 - e for e in spans]
-    # print("avg coverage:           ", sum(span_coverage)/len(span_coverage))
-    # print("min coverage:           ", min(span_coverage))
-    # print("max coverage:           ", max(span_coverage))
-    # print("avg density:            ", sum(span_counts)/float(len(span_counts)))
-    # print("min density:            ", min(span_counts))
-    # print("max density:            ", max(span_counts))
-
-    # nonzero_coverage = [span_coverage[i] for i in range(len(span_counts)) if span_counts[i] != 0]
-    # nonzero_counts = [e for e in span_counts if e != 0]
-    # print("avg coverage (nonzero): ", sum(nonzero_coverage)/len(nonzero_coverage))
-    # print("min coverage (nonzero): ", min(nonzero_coverage))
-    # print("max coverage (nonzero): ", max(nonzero_coverage))
-    # print("avg density (nonzero):  ", sum(nonzero_counts)/float(len(nonzero_counts)))
-    # print("min density (nonzero):  ", min(nonzero_counts))
-    # print("max density (nonzero):  ", max(nonzero_counts))
