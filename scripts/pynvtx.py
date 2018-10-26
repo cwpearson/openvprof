@@ -16,6 +16,7 @@ DEPTH_LIMIT = None
 
 # https://docs.python.org/2/library/sys.html#sys.setprofile
 # https://docs.python.org/2/library/inspect.html
+# https://gist.github.com/techtonik/2151727
 
 try:
     import threading
@@ -42,6 +43,13 @@ NVTOOLSEXT_PATHS = [
     '/usr/local/cuda/lib/libnvToolsExt.so',
 ]
 
+# load the nvToolsExt library
+LIBCUDART_PATHS = [
+    'libcudart.dylib',
+    'libcudart.so',
+    '/usr/local/cuda/lib/libcudart.dylib',
+    '/usr/local/cuda/lib/libcudart.so',
+]
 
 lib = None
 for path in NVTOOLSEXT_PATHS:
@@ -69,6 +77,19 @@ else:
     def _nvtxRangePop(): pass
 
 
+libcudart = None
+for path in LIBCUDART_PATHS:
+    try:
+        libcudart = ctypes.cdll.LoadLibrary(path)
+    except OSError as e:
+        logger.debug(
+            "failed to load CUDA Runtime from {}".format(path))
+        libcudart = None
+    else:
+        logger.info("loaded CUDA Runtime from {}".format(path))
+        break
+
+
 def get_static_class(frame):
     """return the class name of a call frame in a static method"""
     # look in the parent stack frame for a line of code that looks like a static method definition, and use that if found
@@ -94,11 +115,47 @@ def get_method_class(frame):
 
 
 def tracefunc(frame, event, arg, depth=[0]):
+    # if event == "c_call":
+    #     # arg is the c function object
+    #     print("C CALL")
+    #     depth[0] += 1
+    #     if DEPTH_LIMIT and depth[0] > DEPTH_LIMIT:
+    #         return tracefunc
+    #     function_name = arg.__name__
+    #     # print(function_name)
+    #     print(inspect.getmodule(arg))
     if event == "call":
+        # arg is none
+        name = []
+        # print("CALL")
+        module = inspect.getmodule(frame)
+        # print(inspect.getmembers(module))
+
+        if module:
+            name.append(module.__name__)
+        else:
+            return tracefunc
+        if 'self' in frame.f_locals:
+            # I don't know any way to detect call from the object method
+            # XXX: there seems to be no way to detect static method call - it will
+            #      be just a function call
+            name.append(frame.f_locals['self'].__class__.__name__)
+        codename = frame.f_code.co_name
+        if codename != '<module>':  # top level usually
+            name.append(codename)  # function or a method
+        print(depth[0] * " " + ".".join(name))
         depth[0] += 1
         if DEPTH_LIMIT and depth[0] > DEPTH_LIMIT:
             return tracefunc
-        function_name = frame.f_code.co_name
+        filename, lineno, function_name, code_context, index = inspect.getframeinfo(
+            frame)
+        # function_name = frame.f_code.co_name
+        # print(inspect.getmodule(frame))
+        if filename[-3:] != ".py":
+            return tracefunc
+        # print(filename)
+        # print(inspect.getmodulename(filename))
+        # print(inspect.getmodule(function))
         file_name = frame.f_code.co_filename
         # don't record call of _unsettrace (won't see exit)
         if function_name == "_unsettrace":
@@ -107,6 +164,12 @@ def tracefunc(frame, event, arg, depth=[0]):
         range_name = file_name + "::" + function_name
         # logger.debug(range_name)
         _nvtxRangePush(range_name)
+    # elif event == "c_return":
+    #     # arg is the c function object
+    #     frame_depth = depth[0]
+    #     depth[0] -= 1
+    #     if DEPTH_LIMIT and depth[0] > DEPTH_LIMIT:
+    #         return tracefunc
     elif event == "return":
         frame_depth = depth[0]
         depth[0] -= 1
@@ -130,6 +193,64 @@ def runctx(cmd, globals=None, locals=None):
         exec(cmd, globals, locals)
     finally:
         _unsettrace()
+
+
+class Tracer(object):
+    def __init__(self, progname, prog_argv, depth=None):
+        self.prog_name = progname
+        self.prog_argv = prog_argv
+        self.depth = depth
+        self.libnvtoolsext = None
+        self.libcudart = None
+        # load the nvToolsExt and cudart libraries
+        NVTOOLSEXT_PATHS = [
+            'libnvToolsExt.dylib',
+            'libnvToolsExt.so',
+            '/usr/local/cuda/lib/libnvToolsExt.dylib',
+            '/usr/local/cuda/lib/libnvToolsExt.so',
+        ]
+        for path in NVTOOLSEXT_PATHS:
+            try:
+                self.libnvtoolsext = ctypes.cdll.LoadLibrary(path)
+            except OSError as e:
+                logger.debug(
+                    "failed to load Nvidia Tools Extensions from {}".format(path))
+                self.libnvtoolsext = None
+            else:
+                logger.info(
+                    "loaded Nvidia Tools Extensions from {}".format(path))
+                break
+        CUDART_PATHS = [
+            'libcudart.dylib',
+            'libcudart.so',
+            '/usr/local/cuda/lib/libcudart.dylib',
+            '/usr/local/cuda/lib/libcudart.so',
+        ]
+        for path in CUDART_PATHS:
+            try:
+                self.libcudart = ctypes.cdll.LoadLibrary(path)
+            except OSError as e:
+                logger.debug(
+                    "failed to load CUDA Runtime from {}".format(path))
+                self.libcudart = None
+            else:
+                logger.info(
+                    "loaded CUDA Runtime from {}".format(path))
+                break
+
+        if self.libnvtoolsext:
+            def _nvtxRangePush(self, s):
+                self.libnvtoolsext.nvtxRangePushA(
+                    ctypes.c_char_p(str.encode(s)))
+
+            def _nvtxRangePop(self):
+                self.libnvtoolsext.nvtxRangePop()
+        else:
+            logger.error("couldn't load any of {}".format(NVTOOLSEXT_PATHS))
+
+            def _nvtxRangePush(self, _): pass
+
+            def _nvtxRangePop(self): pass
 
 
 def main():
@@ -163,6 +284,8 @@ def main():
     sys.argv = prog_argv
     progname = prog_argv[0]
     sys.path[0] = os.path.split(progname)[0]
+
+    t = Tracer(progname, prog_argv, depth=args.depth)
 
     try:
         with open(progname) as fp:

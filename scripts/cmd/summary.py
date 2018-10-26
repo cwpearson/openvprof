@@ -226,7 +226,7 @@ def summary(ctx, filename, range_name):
     nvprof_id_to_string, nvprof_string_to_id = db.get_strings()
 
     filters = set()
-    logger.debug("Loading ranges to look for matching spans")
+    logger.debug("Looking for matching ranges")
     for row in db.execute("select id, Max(name), Min(timestamp), Max(timestamp) from CUPTI_ACTIVITY_KIND_MARKER group by id"):
         id_ = row[0]
         name_idx = row[1]
@@ -244,10 +244,6 @@ def summary(ctx, filename, range_name):
     # for row in db.rows('CUPTI_ACTIVITY_KIND_MARKER'):
     #     pass
 
-    logging.debug("Opening {}".format(filename))
-    conn = sqlite3.connect(filename)
-    c = conn.cursor()
-
     search_tables = [
         'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL',
         'CUPTI_ACTIVITY_KIND_MEMCPY',
@@ -255,6 +251,9 @@ def summary(ctx, filename, range_name):
         'CUPTI_ACTIVITY_KIND_KERNEL',
     ]
 
+    logging.debug("Opening {}".format(filename))
+    conn = sqlite3.connect(filename)
+    c = conn.cursor()
     begins = []
     ends = []
     for table_name in search_tables:
@@ -282,11 +281,10 @@ def summary(ctx, filename, range_name):
         s = Span(start_ns, end_ns)
         s = filter_spans([s], filters)
         if s:
-            print(s[0], "overlaps", [str(f) for f in filters])
             AT.add_gpu_span(gpu_id, start_ns, end_ns)
 
     logger.debug("reading table CUPTI_ACTIVITY_KIND_KERNEL...")
-    for row in c.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_KERNEL"):
+    for row in db.rows('CUPTI_ACTIVITY_KIND_KERNEL'):
         start_ns = row[6]
         end_ns = row[7]
         gpu_id = row[9]
@@ -296,7 +294,7 @@ def summary(ctx, filename, range_name):
             AT.add_gpu_span(gpu_id, start_ns, end_ns)
 
     logger.debug("reading table CUPTI_ACTIVITY_KIND_MEMCPY...")
-    for row in c.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_MEMCPY"):
+    for row in db.rows('CUPTI_ACTIVITY_KIND_MEMCPY'):
         src_kind = row[2]
         dst_kind = row[3]
         start_ns = row[6]
@@ -316,7 +314,7 @@ def summary(ctx, filename, range_name):
             AT.add_comm_span(src_tag, dst_tag, start_ns, end_ns)
 
     logger.debug("reading table CUPTI_ACTIVITY_KIND_MEMCPY2...")
-    for row in c.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_MEMCPY2"):
+    for row in db.rows('CUPTI_ACTIVITY_KIND_MEMCPY2'):
         start_ns = row[6]
         end_ns = row[7]
         src_gpu = row[11]
