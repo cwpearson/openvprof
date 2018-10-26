@@ -225,19 +225,15 @@ def tracefunc(frame, event, arg, ranges=[[]], mode=[None]):
     #     if DEPTH_LIMIT and depth[0] > DEPTH_LIMIT:
     #         return tracefunc
     elif event == "return" or event == "c_return":
-        if frame.f_code.co_name == "_settrace":
-            return tracefunc
+        # don't record exit of _settrace (won't see call)
+        # if frame.f_code.co_name == "_settrace":
+        #     return tracefunc
         if ranges[0]:
             if ranges[0][-1] == frame:
                 _nvtxRangePop()
                 ranges[0] = ranges[0][:-1]
-                name = full_name(frame)
+                # name = full_name(frame)
                 # print(len(ranges[0]) * " " + "POP", ".".join(name))
-        # name = frame.f_code.co_name
-
-        # don't record exit of _settrace (won't see call)
-        if frame.f_code.co_name == "_settrace":
-            return tracefunc
 
     return tracefunc
 
