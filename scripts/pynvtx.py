@@ -191,23 +191,26 @@ def tracefunc(frame, event, arg, ranges=[[]], mode=[None]):
 
         module = inspect.getmodule(frame)
 
-        # if there is a module, and functio name is <module>, this is an import, which we will
-        # not instrument
-        # if there were not a module, this would be the start of our own code, which we do
-        # not want to skip
+        # if we have come across the init of a module, don't record ranges until it returns
         if module and function_name == "<module>":
-            print("import of", module, " wait for return...")
+            print("init of ", module, " wait for return...")
             mode[0] = frame
             return tracefunc
-        if function_name == "<module>":
+        # skip any imports
+        if "importlib" in frame.f_code.co_filename:
+            print("saw importlib..wait for return...")
+            mode[0] = frame
             return tracefunc
+        # if function_name == "<module>":
+        #     return tracefunc
 
         # we may have defined the functions that are not part of a module, so we don't want to skip
         # if module is None:
         #     return tracefunc
 
         if event == "call":
-            name = full_name(frame, module=module)
+            name = [str(frame.f_code.co_filename)] + \
+                full_name(frame, module=module)
         else:
             name = function_full_name(arg, module=module)
         # filename, lineno, function_name, code_context, index = inspect.getframeinfo(frame)

@@ -1,5 +1,6 @@
 import time
 import tensorflow
+import numpy
 import sys
 
 
