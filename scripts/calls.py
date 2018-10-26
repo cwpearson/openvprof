@@ -1,11 +1,12 @@
 import time
+# import tensorflow as tf
 import sys
-import tensorflow as tf
+
 
 if len(sys.argv) > 1:
     num = int(sys.argv[1])
 else:
-    num = 1_000
+    num = 2_000
 
 
 class Fooer(object):
@@ -17,7 +18,11 @@ class Fooer(object):
 
 
 builtin_foo = time.time
-package_foo = tf.keras.layers.Flatten
+try:
+    package_foo = tf.keras.layers.Flatten
+except:
+    def package_foo():
+        pass
 f = Fooer()
 
 print(time.time())

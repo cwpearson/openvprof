@@ -114,55 +114,81 @@ def get_method_class(frame):
     return class_name
 
 
-def tracefunc(frame, event, arg, depth=[0]):
-    # if event == "c_call":
-    #     # arg is the c function object
-    #     print("C CALL")
-    #     depth[0] += 1
-    #     if DEPTH_LIMIT and depth[0] > DEPTH_LIMIT:
-    #         return tracefunc
-    #     function_name = arg.__name__
-    #     # print(function_name)
-    #     print(inspect.getmodule(arg))
-    if event == "call":
-        # arg is none
-        name = []
-        # print("CALL")
-        module = inspect.getmodule(frame)
-        # print(inspect.getmembers(module))
+def function_full_name(function, module=None):
+    name = []
+    if not module:
+        module = inspect.getmodule(function)
+    # print(inspect.getmembers(module))
 
-        if module:
-            name.append(module.__name__)
+    if module:
+        name.append(module.__name__)
+
+    name.append(function.__name__)
+    return name
+
+
+def full_name(frame, module=None):
+    name = []
+    if not module:
+        module = inspect.getmodule(frame)
+    # print(inspect.getmembers(module))
+
+    if module:
+        name.append(module.__name__)
+    if 'self' in frame.f_locals:
+        # I don't know any way to detect call from the object method
+        # XXX: there seems to be no way to detect static method call - it will
+        #      be just a function call
+        try:
+            class_name = frame.f_locals['self'].__class__.__name__
+        except KeyError:
+            class_name = None
+        if class_name:
+            name.append(class_name)
+    codename = frame.f_code.co_name
+    # if codename != '<module>':  # top level usually
+    #    name.append(codename)  # function or a method
+    name.append(codename)
+    return name
+
+
+# modcache = {}
+
+
+def tracefunc(frame, event, arg, ranges=[[]]):
+
+    if event == "call" or event == "c_call":
+        if event == "call":
+            function_name = frame.f_code.co_name
         else:
-            return tracefunc
-        if 'self' in frame.f_locals:
-            # I don't know any way to detect call from the object method
-            # XXX: there seems to be no way to detect static method call - it will
-            #      be just a function call
-            name.append(frame.f_locals['self'].__class__.__name__)
-        codename = frame.f_code.co_name
-        if codename != '<module>':  # top level usually
-            name.append(codename)  # function or a method
-        print(depth[0] * " " + ".".join(name))
-        depth[0] += 1
-        if DEPTH_LIMIT and depth[0] > DEPTH_LIMIT:
-            return tracefunc
-        filename, lineno, function_name, code_context, index = inspect.getframeinfo(
-            frame)
-        # function_name = frame.f_code.co_name
-        # print(inspect.getmodule(frame))
-        if filename[-3:] != ".py":
-            return tracefunc
-        # print(filename)
-        # print(inspect.getmodulename(filename))
-        # print(inspect.getmodule(function))
-        file_name = frame.f_code.co_filename
+            function_name = arg.__name__
         # don't record call of _unsettrace (won't see exit)
         if function_name == "_unsettrace":
             return tracefunc
-        #filename, lineno, function, code_context, index = inspect.getframeinfo(frame)
-        range_name = file_name + "::" + function_name
-        # logger.debug(range_name)
+        # skip top-level module imports
+        if function_name == "<module>":
+            return tracefunc
+        # skip functions that are not part of a module (mostly c built-ins?)
+        # if module is None:
+        #     return tracefunc
+        # arg is none
+
+        module = inspect.getmodule(frame)
+        if event == "call":
+            name = full_name(frame, module=module)
+        else:
+            name = function_full_name(arg, module=module)
+        # if event == "c_call":
+        #     if inspect.isbuiltin(arg):
+        #         # print("SKIP_BUILTIN", arg.__name__)
+        #         return tracefunc
+        #     else:
+        #         print("AHHH")
+        #         sys.exit(1)
+        # filename, lineno, function_name, code_context, index = inspect.getframeinfo(frame)
+        range_name = ".".join(name)
+        # print(len(ranges[0]) * " " + "PUSH", ".".join(name))
+        ranges[0].append(frame)
         _nvtxRangePush(range_name)
     # elif event == "c_return":
     #     # arg is the c function object
@@ -170,16 +196,21 @@ def tracefunc(frame, event, arg, depth=[0]):
     #     depth[0] -= 1
     #     if DEPTH_LIMIT and depth[0] > DEPTH_LIMIT:
     #         return tracefunc
-    elif event == "return":
-        frame_depth = depth[0]
-        depth[0] -= 1
-        if DEPTH_LIMIT and depth[0] > DEPTH_LIMIT:
+    elif event == "return" or event == "c_return":
+        if frame.f_code.co_name == "_settrace":
             return tracefunc
-        name = frame.f_code.co_name
+        if ranges[0]:
+            if ranges[0][-1] == frame:
+                _nvtxRangePop()
+                ranges[0] = ranges[0][:-1]
+                name = full_name(frame)
+                # print(len(ranges[0]) * " " + "POP", ".".join(name))
+        # name = frame.f_code.co_name
+
         # don't record exit of _settrace (won't see call)
-        if name == "_settrace":
+        if frame.f_code.co_name == "_settrace":
             return tracefunc
-        _nvtxRangePop()
+
     return tracefunc
 
 
