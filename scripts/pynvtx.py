@@ -169,6 +169,8 @@ def tracefunc2(frame, event, arg, ranges=[[]]):
 
 def tracefunc(frame, event, arg, ranges=[[]], mode=[None]):
 
+    global DEPTH_LIMIT
+
     # wait for the import to return
     if mode[0]:
         if event == "return":
@@ -178,6 +180,10 @@ def tracefunc(frame, event, arg, ranges=[[]], mode=[None]):
         return tracefunc
 
     if event == "call" or event == "c_call":
+        if DEPTH_LIMIT:
+            if len(ranges[0]) > DEPTH_LIMIT:
+                return tracefunc
+
         if event == "call":
             # don't record call of _unsettrace (won't see exit)
             function_name = frame.f_code.co_name
@@ -189,6 +195,12 @@ def tracefunc(frame, event, arg, ranges=[[]], mode=[None]):
                 return tracefunc
             function_name = arg.__name__
 
+        # skip any imports
+        if "importlib" in frame.f_code.co_filename:
+            print("saw importlib..wait for return...")
+            mode[0] = frame
+            return tracefunc
+
         module = inspect.getmodule(frame)
 
         # if we have come across the init of a module, don't record ranges until it returns
@@ -196,11 +208,7 @@ def tracefunc(frame, event, arg, ranges=[[]], mode=[None]):
             print("init of ", module, " wait for return...")
             mode[0] = frame
             return tracefunc
-        # skip any imports
-        if "importlib" in frame.f_code.co_filename:
-            print("saw importlib..wait for return...")
-            mode[0] = frame
-            return tracefunc
+
         # if function_name == "<module>":
         #     return tracefunc
 
@@ -209,8 +217,9 @@ def tracefunc(frame, event, arg, ranges=[[]], mode=[None]):
         #     return tracefunc
 
         if event == "call":
-            name = [str(frame.f_code.co_filename)] + \
-                full_name(frame, module=module)
+            name = []
+            # name += [str(frame.f_code.co_filename)]
+            name += full_name(frame, module=module)
         else:
             name = function_full_name(arg, module=module)
         # filename, lineno, function_name, code_context, index = inspect.getframeinfo(frame)
@@ -309,6 +318,8 @@ class Tracer(object):
 
 
 def main():
+
+    global DEPTH_LIMIT
 
     import argparse
 
