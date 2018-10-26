@@ -154,37 +154,62 @@ def full_name(frame, module=None):
 
 # modcache = {}
 
-
-def tracefunc(frame, event, arg, ranges=[[]]):
-
+def tracefunc2(frame, event, arg, ranges=[[]]):
     if event == "call" or event == "c_call":
         if event == "call":
             function_name = frame.f_code.co_name
         else:
             function_name = arg.__name__
-        # don't record call of _unsettrace (won't see exit)
-        if function_name == "_unsettrace":
-            return tracefunc
-        # skip top-level module imports
-        if function_name == "<module>":
-            return tracefunc
-        # skip functions that are not part of a module (mostly c built-ins?)
-        # if module is None:
-        #     return tracefunc
-        # arg is none
+        module = inspect.getmodule(frame)
+        # _nvtxRangePush(" ")
+    elif event == "return" or event == "c_return":
+        # _nvtxRangePop()
+        pass
+
+
+def tracefunc(frame, event, arg, ranges=[[]], mode=[None]):
+
+    # wait for the import to return
+    if mode[0]:
+        if event == "return":
+            if frame == mode[0]:
+                print("import returned")
+                mode[0] = None
+        return tracefunc
+
+    if event == "call" or event == "c_call":
+        if event == "call":
+            # don't record call of _unsettrace (won't see exit)
+            function_name = frame.f_code.co_name
+            if function_name == "_unsettrace":
+                return tracefunc
+        else:
+            # skip builtins
+            if inspect.isbuiltin(arg):
+                return tracefunc
+            function_name = arg.__name__
 
         module = inspect.getmodule(frame)
+
+        # if there is a module, and functio name is <module>, this is an import, which we will
+        # not instrument
+        # if there were not a module, this would be the start of our own code, which we do
+        # not want to skip
+        if module and function_name == "<module>":
+            print("import of", module, " wait for return...")
+            mode[0] = frame
+            return tracefunc
+        if function_name == "<module>":
+            return tracefunc
+
+        # we may have defined the functions that are not part of a module, so we don't want to skip
+        # if module is None:
+        #     return tracefunc
+
         if event == "call":
             name = full_name(frame, module=module)
         else:
             name = function_full_name(arg, module=module)
-        # if event == "c_call":
-        #     if inspect.isbuiltin(arg):
-        #         # print("SKIP_BUILTIN", arg.__name__)
-        #         return tracefunc
-        #     else:
-        #         print("AHHH")
-        #         sys.exit(1)
         # filename, lineno, function_name, code_context, index = inspect.getframeinfo(frame)
         range_name = ".".join(name)
         # print(len(ranges[0]) * " " + "PUSH", ".".join(name))

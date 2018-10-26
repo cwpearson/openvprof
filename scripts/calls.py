@@ -1,5 +1,5 @@
 import time
-# import tensorflow as tf
+import tensorflow
 import sys
 
 
@@ -19,7 +19,7 @@ class Fooer(object):
 
 builtin_foo = time.time
 try:
-    package_foo = tf.keras.layers.Flatten
+    package_foo = tensorflow.keras.layers.Flatten
 except:
     def package_foo():
         pass
@@ -32,6 +32,6 @@ for i in range(num):
     builtin_foo()
     Fooer.static_foo(i)
     f.method_foo(i)
-    package_foo()
+    # package_foo()
 
 print(time.time())
