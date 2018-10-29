@@ -150,6 +150,8 @@ class ApproxTimeline(object):
                self.segment_extent >= self.end_time)
         self.gpu_kernel_tracks = {}
         self.comm_tracks = {}
+        self.driver_track = self.empty_track()
+        self.runtime_track = self.empty_track()
 
     def empty_track(self):
         return Segments(self.num_segments)
@@ -199,6 +201,12 @@ class ApproxTimeline(object):
             self.comm_tracks[track_id] = self.empty_track()
         self.add_span(self.comm_tracks[track_id], start, end)
 
+    def add_driver_span(self, start, end):
+        self.add_span(self.driver_track, start, end)
+
+    def add_runtime_span(self, start, end):
+        self.add_span(self.runtime_track, start, end)
+
 
 def filter_spans(sources, filters):
     """return only spans from sources that overlap with at least one span in filters"""
@@ -217,26 +225,26 @@ def filter_spans(sources, filters):
 @click.pass_context
 def summary(ctx, filename, range_name):
 
-    logging.debug("restricting to nvtx ranges: {}".format(
-        ", ".join(range_name)))
-
     db = Db(filename)
 
     logger.debug("Loading strings")
     nvprof_id_to_string, nvprof_string_to_id = db.get_strings()
 
     filters = set()
-    logger.debug("Looking for matching ranges")
-    for row in db.execute("select id, Max(name), Min(timestamp), Max(timestamp) from CUPTI_ACTIVITY_KIND_MARKER group by id"):
-        id_ = row[0]
-        name_idx = row[1]
-        name = nvprof_id_to_string[name_idx]
-        start = row[2]
-        end = row[3]
-        if name in range_name:
-            filters.add(Span(start, end))
-    logger.debug("Found {} ranges matching at least one of {}".format(
-        len(filters), range_name))
+    if range_name:
+        logging.debug("restricting to nvtx ranges: {}".format(
+            ", ".join(range_name)))
+        logger.debug("Looking for matching ranges")
+        for row in db.execute("select id, Max(name), Min(timestamp), Max(timestamp) from CUPTI_ACTIVITY_KIND_MARKER group by id"):
+            id_ = row[0]
+            name_idx = row[1]
+            name = nvprof_id_to_string[name_idx]
+            start = row[2]
+            end = row[3]
+            if name in range_name:
+                filters.add(Span(start, end))
+        logger.debug("Found {} ranges matching at least one of {}".format(
+            len(filters), range_name))
 
     # get timespans from batches of ranges
     # build a script with those timespans
@@ -249,6 +257,8 @@ def summary(ctx, filename, range_name):
         'CUPTI_ACTIVITY_KIND_MEMCPY',
         'CUPTI_ACTIVITY_KIND_MEMCPY2',
         'CUPTI_ACTIVITY_KIND_KERNEL',
+        'CUPTI_ACTIVITY_KIND_DRIVER',
+        'CUPTI_ACTIVITY_KIND_RUNTIME'
     ]
 
     logging.debug("Opening {}".format(filename))
@@ -258,22 +268,27 @@ def summary(ctx, filename, range_name):
     ends = []
     for table_name in search_tables:
         if table_exists(c, table_name):
-            logger.debug("Getting timestamp extent for {}".format(table_name))
+            logger.debug(
+                "reading {}: first and last record".format(table_name))
             begin, end = table_time_extent(c, table_name)
             if begin and end:
-                logger.debug("{}: has events from {} to {}".format(
+                logger.debug("found records from {} to {}".format(
                     table_name, begin, end))
                 begins += [begin]
                 ends += [end]
+            else:
+                logger.debug("{}: no records".format(table_name))
 
     begin = min(begins)
     end = max(ends)
-    logger.debug("Paritioning time between {} and {} = {}".format(
+    logger.debug("Paritioning time between {} and {} ({}ns)".format(
         begin, end, end-begin))
 
     AT = ApproxTimeline(begin, end)
 
-    logger.debug("reading table CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL...")
+    # FIXME: is it possible to record segment coverage as if spans don't overlap?
+
+    logger.debug("reading CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL...")
     for row in db.rows('CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL'):
         start_ns = row[6]
         end_ns = row[7]
@@ -283,7 +298,7 @@ def summary(ctx, filename, range_name):
         if s:
             AT.add_gpu_span(gpu_id, start_ns, end_ns)
 
-    logger.debug("reading table CUPTI_ACTIVITY_KIND_KERNEL...")
+    logger.debug("reading CUPTI_ACTIVITY_KIND_KERNEL...")
     for row in db.rows('CUPTI_ACTIVITY_KIND_KERNEL'):
         start_ns = row[6]
         end_ns = row[7]
@@ -293,7 +308,7 @@ def summary(ctx, filename, range_name):
         if s:
             AT.add_gpu_span(gpu_id, start_ns, end_ns)
 
-    logger.debug("reading table CUPTI_ACTIVITY_KIND_MEMCPY...")
+    logger.debug("reading CUPTI_ACTIVITY_KIND_MEMCPY...")
     for row in db.rows('CUPTI_ACTIVITY_KIND_MEMCPY'):
         src_kind = row[2]
         dst_kind = row[3]
@@ -313,7 +328,7 @@ def summary(ctx, filename, range_name):
         if s:
             AT.add_comm_span(src_tag, dst_tag, start_ns, end_ns)
 
-    logger.debug("reading table CUPTI_ACTIVITY_KIND_MEMCPY2...")
+    logger.debug("reading CUPTI_ACTIVITY_KIND_MEMCPY2...")
     for row in db.rows('CUPTI_ACTIVITY_KIND_MEMCPY2'):
         start_ns = row[6]
         end_ns = row[7]
@@ -326,6 +341,25 @@ def summary(ctx, filename, range_name):
         if s:
             AT.add_comm_span(src_tag, dst_tag, start_ns, end_ns)
 
+    logger.debug("reading CUPTI_ACTIVITY_KIND_DRIVER...")
+    for row in db.rows('CUPTI_ACTIVITY_KIND_DRIVER'):
+        start_ns = row[2]
+        end_ns = row[3]
+        s = Span(start_ns, end_ns)
+        s = filter_spans([s], filters)
+        if s:
+            AT.add_driver_span(start_ns, end_ns)
+
+    logger.debug("reading CUPTI_ACTIVITY_KIND_RUNTIME...")
+    for row in db.rows('CUPTI_ACTIVITY_KIND_RUNTIME'):
+        start_ns = row[2]
+        end_ns = row[3]
+        s = Span(start_ns, end_ns)
+        s = filter_spans([s], filters)
+        if s:
+            AT.add_runtime_span(start_ns, end_ns)
+
+    # print data about each track
     for gpu_id in AT.gpu_kernel_tracks:
         track = AT.gpu_kernel_tracks[gpu_id]
         pfx = "kernels::{}: ".format(gpu_id)
@@ -350,3 +384,12 @@ def summary(ctx, filename, range_name):
         print(pfx + " avg density = {}".format(av))
         print(pfx + " min density = {}".format(mi))
         print(pfx + " max density = {}".format(ma))
+
+    # print estimates of exposed computation of various types
+    print("No spans:               UNIMPLEMENTED")
+    print("exposed driver/runtime: UNIMPLEMENTED")
+    print("exposed kernels:        UNIMPLEMENTED")
+    print("exposed transfer:       UNIMPLEMENTED")
+    print("  h2d:                  UNIMPLEMENTED")
+    print("  d2h:                  UNIMPLEMENTED")
+    print("  d2d:                  UNIMPLEMENTED")
