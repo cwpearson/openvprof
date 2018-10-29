@@ -5,7 +5,9 @@ import sqlite3
 
 class Db(object):
     def __init__(self, filename=None):
-        self.conn = sqlite3.connect(filename)
+        # read-only
+        uri_str = "file:"+filename+"?mode=ro"
+        self.conn = sqlite3.connect(uri_str, uri=True)
         self.cursor = self.conn.cursor()
 
     def get_strings(self):
@@ -20,8 +22,12 @@ class Db(object):
             string_to_id[s] = id_
         return id_to_string, string_to_id
 
-    def rows(self, table_name):
-        return self.cursor.execute("SELECT * from {}".format(table_name))
+    def rows(self, table_name, columns=[]):
+        if not columns:
+            col_str = "*"
+        else:
+            col_str = ",".join(columns)
+        return self.cursor.execute("SELECT {} from {}".format(col_str, table_name))
 
     def execute(self, s):
         return self.cursor.execute(s)

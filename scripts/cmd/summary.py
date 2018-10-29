@@ -1,7 +1,9 @@
 import click
+import copy
 import sqlite3
 import logging
 import sys
+import time
 from math import ceil
 
 import cupti.activity_memory_kind
@@ -73,9 +75,17 @@ class Segments(object):
         return o
 
     def __or__(a, b):
-        raise NotImplementedError
+        new = copy.deepcopy(a)
+        new |= b
+        return new
 
-    def add_coverage(self, segment_id, coverage):
+    def __ior__(self, rhs):
+        assert len(self.segments) == len(rhs.segments)
+        for i in range(len(self.segments)):
+            self.add_coverage(i, rhs.segments[i], rhs.segment_counts[i])
+        return self
+
+    def add_coverage(self, segment_id, coverage, inc=1):
         assert segment_id >= 0
         assert segment_id < len(self.segments)
 
@@ -88,7 +98,7 @@ class Segments(object):
 
         new_coverage = (1 - (1 - current_coverage) * (1 - coverage))
         self.segments[segment_id] = new_coverage
-        self.segment_counts[segment_id] += 1
+        self.segment_counts[segment_id] += inc
         return current_coverage
 
     def average_coverage(self):
@@ -101,18 +111,17 @@ class Segments(object):
         return sum(self.segment_counts)
 
     def _coverage_stats(segments):
-        """return (min,max,avg) coverage in segments"""
+        """return (min,max,avg,sum) coverage in segments"""
         if segments == []:
-            return None, None, None
+            return None, None, None, None
         min_coverage = segments[0]
         max_coverage = segments[0]
-        avg_coverage = segments[0]
+        sum_coverage = segments[0]
         for coverage in segments[1:]:
             min_coverage = min(coverage, min_coverage)
             max_coverage = max(coverage, max_coverage)
-            avg_coverage += coverage
-        avg_coverage /= len(segments)
-        return min_coverage, max_coverage, avg_coverage
+            sum_coverage += coverage
+        return min_coverage, max_coverage, sum_coverage / len(segments), sum_coverage
 
     def _density_stats(segment_counts):
         """return (min,max,avg) number of spans in segments"""
@@ -128,7 +137,7 @@ class Segments(object):
         avg_density /= len(segment_counts)
         return min_density, max_density, avg_density
 
-    def converage_stats(self):
+    def coverage_stats(self):
         return Segments._coverage_stats(self.segments)
 
     def density_stats(self):
@@ -156,6 +165,12 @@ class ApproxTimeline(object):
     def empty_track(self):
         return Segments(self.num_segments)
 
+    def get_expected_empty(segments, self):
+        """return the expected time that a track is empty"""
+        _, _, _, total_coverage = segments.coverage_stats()
+        coverage_time = total_coverage * self.segment_extent
+        return self.segment_extent * self.num_segments - coverage_time
+
     def get_segment_id(self, timestamp):
         segment_id = int((timestamp - self.begin_time) // self.segment_extent)
         assert segment_id >= 0
@@ -169,19 +184,20 @@ class ApproxTimeline(object):
 
         for segment_id in range(start_id, end_id + 1):
             if segment_id == start_id and segment_id == end_id:
-                coverage = (end - start) / self.segment_extent
+                coverage = float(end - start) / self.segment_extent
                 # logger.debug("[{}-{}] / {} = {} (contained)".format(start_ns, end_ns, span_size, coverage))
                 assert(coverage >= 0.0)
                 assert(coverage <= 1.0)
             elif segment_id == start_id:
                 segment_start = start_id * self.segment_extent + self.begin_time
-                coverage = 1.0 - (start - segment_start) / self.segment_extent
+                coverage = 1.0 - \
+                    float(start - segment_start) / self.segment_extent
                 # logger.debug("[{}-{}] / {} = {}".format(start_ns, span_start + span_size, span_size, coverage))
                 assert(coverage >= 0.0)
                 assert(coverage <= 1.0)
             elif segment_id == end_id:
                 segment_start = end_id * self.segment_extent + self.begin_time
-                coverage = (end - segment_start) / self.segment_extent
+                coverage = float(end - segment_start) / self.segment_extent
                 # logger.debug("[{}-{}] / {} = {}".format(span_start, end_ns, span_size, coverage))
                 assert(coverage >= 0.0)
                 assert(coverage <= 1.0)
@@ -272,8 +288,7 @@ def summary(ctx, filename, range_name):
                 "reading {}: first and last record".format(table_name))
             begin, end = table_time_extent(c, table_name)
             if begin and end:
-                logger.debug("found records from {} to {}".format(
-                    table_name, begin, end))
+                logger.debug("found records from {} to {}".format(begin, end))
                 begins += [begin]
                 ends += [end]
             else:
@@ -281,25 +296,32 @@ def summary(ctx, filename, range_name):
 
     begin = min(begins)
     end = max(ends)
-    logger.debug("Paritioning time between {} and {} ({}ns)".format(
-        begin, end, end-begin))
+    logger.debug("Paritioning time between {}-{} ({}ns) ({}s)".format(
+        begin, end, end-begin, (end-begin)/1e9))
 
     AT = ApproxTimeline(begin, end)
+
+    logger.debug("Segments are length {}ns".format(AT.segment_extent))
 
     # FIXME: is it possible to record segment coverage as if spans don't overlap?
 
     logger.debug("reading CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL...")
-    for row in db.rows('CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL'):
-        start_ns = row[6]
-        end_ns = row[7]
-        gpu_id = row[9]
+    start = time.time()
+    num_rows = 0
+    for row in db.rows('CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL', ['start', 'end', 'deviceId']):
+        num_rows += 1
+        start_ns, end_ns, gpu_id = row
         s = Span(start_ns, end_ns)
         s = filter_spans([s], filters)
         if s:
             AT.add_gpu_span(gpu_id, start_ns, end_ns)
+    logger.debug("{} rows/s".format(int(num_rows / (time.time() - start))))
 
     logger.debug("reading CUPTI_ACTIVITY_KIND_KERNEL...")
+    start = time.time()
+    num_rows = 0
     for row in db.rows('CUPTI_ACTIVITY_KIND_KERNEL'):
+        num_rows += 1
         start_ns = row[6]
         end_ns = row[7]
         gpu_id = row[9]
@@ -307,14 +329,15 @@ def summary(ctx, filename, range_name):
         s = filter_spans([s], filters)
         if s:
             AT.add_gpu_span(gpu_id, start_ns, end_ns)
+    logger.debug("{} rows/s".format(int(num_rows / (time.time() - start))))
 
     logger.debug("reading CUPTI_ACTIVITY_KIND_MEMCPY...")
-    for row in db.rows('CUPTI_ACTIVITY_KIND_MEMCPY'):
-        src_kind = row[2]
-        dst_kind = row[3]
-        start_ns = row[6]
-        end_ns = row[7]
-        device_id = row[8]
+    start = time.time()
+    num_rows = 0
+    for row in db.rows('CUPTI_ACTIVITY_KIND_MEMCPY', [
+            'srcKind', 'dstKind', 'start', 'end', 'deviceId']):
+        num_rows += 1
+        src_kind, dst_kind, start_ns, end_ns, device_id = row
         if src_kind == cupti.activity_memory_kind.DEVICE:
             src_tag = 'gpu' + str(device_id)
         else:
@@ -327,33 +350,37 @@ def summary(ctx, filename, range_name):
         s = filter_spans([s], filters)
         if s:
             AT.add_comm_span(src_tag, dst_tag, start_ns, end_ns)
+    logger.debug("{} rows/s".format(int(num_rows / (time.time() - start))))
 
     logger.debug("reading CUPTI_ACTIVITY_KIND_MEMCPY2...")
-    for row in db.rows('CUPTI_ACTIVITY_KIND_MEMCPY2'):
-        start_ns = row[6]
-        end_ns = row[7]
-        src_gpu = row[11]
-        dst_gpu = row[13]
+    start = time.time()
+    num_rows = 0
+    for row in db.rows('CUPTI_ACTIVITY_KIND_MEMCPY2', ['start', 'end', 'srcDeviceId', 'dstDeviceId']):
+        num_rows += 1
+        start_ns, end_ns, src_gpu, dst_gpu = row
         src_tag = 'gpu' + str(src_gpu)
         dst_tag = 'gpu' + str(dst_gpu)
         s = Span(start_ns, end_ns)
         s = filter_spans([s], filters)
         if s:
             AT.add_comm_span(src_tag, dst_tag, start_ns, end_ns)
+    logger.debug("{} rows/s".format(int(num_rows / (time.time() - start))))
 
     logger.debug("reading CUPTI_ACTIVITY_KIND_DRIVER...")
-    for row in db.rows('CUPTI_ACTIVITY_KIND_DRIVER'):
-        start_ns = row[2]
-        end_ns = row[3]
+    start = time.time()
+    num_rows = 0
+    for row in db.rows('CUPTI_ACTIVITY_KIND_DRIVER', ['start', 'end']):
+        num_rows += 1
+        start_ns, end_ns = row
         s = Span(start_ns, end_ns)
         s = filter_spans([s], filters)
         if s:
             AT.add_driver_span(start_ns, end_ns)
+    logger.debug("{} rows/s".format(int(num_rows / (time.time() - start))))
 
     logger.debug("reading CUPTI_ACTIVITY_KIND_RUNTIME...")
-    for row in db.rows('CUPTI_ACTIVITY_KIND_RUNTIME'):
-        start_ns = row[2]
-        end_ns = row[3]
+    for row in db.rows('CUPTI_ACTIVITY_KIND_RUNTIME', ['start', 'end']):
+        start_ns, end_ns = row
         s = Span(start_ns, end_ns)
         s = filter_spans([s], filters)
         if s:
@@ -364,7 +391,7 @@ def summary(ctx, filename, range_name):
         track = AT.gpu_kernel_tracks[gpu_id]
         pfx = "kernels::{}: ".format(gpu_id)
         print(pfx + " number of spans = {}".format(track.num_spans()))
-        mi, ma, av = track.converage_stats()
+        mi, ma, av, _ = track.coverage_stats()
         print(pfx + " avg coverage = {}".format(av))
         print(pfx + " min coverage = {}".format(mi))
         print(pfx + " max coverage = {}".format(ma))
@@ -376,7 +403,7 @@ def summary(ctx, filename, range_name):
         track = AT.comm_tracks[comm_id]
         pfx = "comm::{}: ".format(comm_id)
         print(pfx + " number of spans = {}".format(track.num_spans()))
-        mi, ma, av = track.converage_stats()
+        mi, ma, av, _ = track.coverage_stats()
         print(pfx + " avg coverage = {}".format(av))
         print(pfx + " min coverage = {}".format(mi))
         print(pfx + " max coverage = {}".format(ma))
@@ -385,8 +412,42 @@ def summary(ctx, filename, range_name):
         print(pfx + " min density = {}".format(mi))
         print(pfx + " max density = {}".format(ma))
 
+    track = AT.runtime_track
+    pfx = "runtime: "
+    print(pfx + " number of spans = {}".format(track.num_spans()))
+    mi, ma, av, _ = track.coverage_stats()
+    print(pfx + " avg coverage = {}".format(av))
+    print(pfx + " min coverage = {}".format(mi))
+    print(pfx + " max coverage = {}".format(ma))
+    mi, ma, avg = track.density_stats()
+    print(pfx + " avg density = {}".format(av))
+    print(pfx + " min density = {}".format(mi))
+    print(pfx + " max density = {}".format(ma))
+
+    track = AT.driver_track
+    pfx = "driver: "
+    print(pfx + " number of spans = {}".format(track.num_spans()))
+    mi, ma, av, _ = track.coverage_stats()
+    print(pfx + " avg coverage = {}".format(av))
+    print(pfx + " min coverage = {}".format(mi))
+    print(pfx + " max coverage = {}".format(ma))
+    mi, ma, avg = track.density_stats()
+    print(pfx + " avg density = {}".format(av))
+    print(pfx + " min density = {}".format(mi))
+    print(pfx + " max density = {}".format(ma))
+
     # print estimates of exposed computation of various types
-    print("No spans:               UNIMPLEMENTED")
+
+    # union of all tracks
+    any_track = AT.empty_track()
+    any_track |= AT.runtime_track
+    for track_id in AT.comm_tracks:
+        any_track |= AT.comm_tracks[track_id]
+    for track_id in AT.gpu_kernel_tracks:
+        any_track |= AT.gpu_kernel_tracks[track_id]
+    absolute = (len(any_track.segments) - sum_coverage) * AT.segment_extent
+    pct = absolute / (len(any_track.segments) * AT.segment_extent)
+    print("No activity:            {} ({}%)".format(absolute, 100 * pct))
     print("exposed driver/runtime: UNIMPLEMENTED")
     print("exposed kernels:        UNIMPLEMENTED")
     print("exposed transfer:       UNIMPLEMENTED")
