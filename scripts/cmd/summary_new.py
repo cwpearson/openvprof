@@ -36,39 +36,24 @@ class Heap(object):
 
 class Timeline(object):
 
-    def __init__(self, multi_active=True):
+    def __init__(self):
         self.num_active = 0
         self.time = 0.0
         self.active_start = None
-        self.multi_active = multi_active
-        self.listeners = set()
 
     def set_idle(self, ts):
-        if not self.multi_active:
-            assert self.num_active == 1
         self.num_active -= 1
+        assert self.num_active >= 0
         if self.num_active == 0:
             self.time += (ts - self.active_start)
 
     def set_active(self, ts):
-        if not self.multi_active:
-            if self.num_active != 0:
-                logger.error(
-                    "state was not idle when set active at {}".format(ts))
-            assert False
         if self.num_active == 0:
             self.active_start = ts
         self.num_active += 1
 
     def is_active(self):
         return self.num_active > 0
-
-    def __or__(a, b):
-        ret = CombinedTimeline()
-
-    def prompt_listeners(self):
-        for l in self.listeners:
-            l.prompt()
 
 
 class CombinedTimeline(object):
@@ -91,37 +76,6 @@ class CombinedTimeline(object):
         self.prev_active = active
 
 
-class NestedTimeline(object):
-    def __init__(self):
-        self.timelines = defaultdict(lambda: Timeline())
-        self.time = 0.0
-
-    def _any_active(self):
-        for _, timeline in self.timelines.items():
-            if timeline.is_active():
-                return True
-        return False
-
-    def _all_idle(self):
-        for _, timeline in self.timelines.items():
-            if timeline.is_active():
-                return False
-        return True
-
-    def set_active(self, key, ts):
-        if not self._any_active():
-            self.active_start = ts
-        self.timelines[key].active(ts)
-
-    def set_idle(self, key, ts):
-        self.timelines[key].idle(ts)
-        if self._all_idle():
-            self.time += (ts - self.active_start)
-
-    def is_active(self):
-        return self._any_active()
-
-
 @click.command()
 @click.argument('filename')
 @click.option('-b', '--begin', help='Only consider events that begin after this time')
@@ -131,8 +85,13 @@ def summary_new(ctx, filename, begin, end):
 
     db = Db(filename)
 
+    logger.debug("Loading devices")
+    devices = db.get_devices()
+    logger.debug("{} devices".format(len(devices)))
+
     logger.debug("Loading strings")
     nvprof_id_to_string, nvprof_string_to_id = db.get_strings()
+    logger.debug("{} strings".format(len(nvprof_id_to_string)))
 
     if end:
         logger.debug("using end = {}".format(end))
@@ -153,17 +112,15 @@ def summary_new(ctx, filename, begin, end):
         total_rows += db.num_rows(table)
     logger.debug("{} rows".format(total_rows))
 
-    iter_column = 'start'
-
-    IDLE = 0
-    BUSY = 1
     START = 'op_start'
     STOP = 'op_stop'
 
-    gpu_kernels = defaultdict(lambda: Timeline())  # indexed by GP
-    comms = defaultdict(lambda: Timeline())  # indexed by GPU
-    # driver_state = NestedTimeline()  # indexed by tid
-    # runtime_states = NestedTimeline()  # indexed by tid
+    gpu_kernels = {}
+    comms = {}
+    for d in devices:
+        gpu_kernels[d.id_] = Timeline()
+        comms[d.id_] = Timeline()
+    runtimes = defaultdict(lambda: Timeline())  # indexed by tid
 
     any_gpu_kernel = CombinedTimeline(lambda: any(k.is_active()
                                                   for _, k in gpu_kernels.items()))
@@ -171,28 +128,30 @@ def summary_new(ctx, filename, begin, end):
     any_comm = CombinedTimeline(lambda: any(c.is_active()
                                             for _, c in comms.items()))
 
+    any_runtime = CombinedTimeline(lambda: any(r.is_active()
+                                               for _, r in runtimes.items()))
+
     exposed_gpu = CombinedTimeline(lambda: any_gpu_kernel.is_active() and not (
-        any_comm.is_active()))
+        any_comm.is_active() or any_runtime.is_active()))
+
+    exposed_comm = CombinedTimeline(lambda: any_comm.is_active() and not (
+        any_gpu.is_active() or any_runtime.is_active()))
 
     queue = []
 
     def consume(table, row, op):
-        nonlocal any_gpu_kernel
-        nonlocal gpu_kernels
-        nonlocal comms
-        nonlocal any_comm
 
         start = None
         end = None
 
-        # if table == "CUPTI_ACTIVITY_KIND_RUNTIME":
-        #     start = row[2]
-        #     end = row[3]
-        #     tid = row[5]
-        #     if op == START:
-        #         runtime_states.set_active(tid, start)
-        #     else:
-        #         runtime_states.set_idle(tid, end)
+        if table == "CUPTI_ACTIVITY_KIND_RUNTIME":
+            start = row[2]
+            end = row[3]
+            tid = row[5]
+            if op == START:
+                runtimes[tid].set_active(start)
+            else:
+                runtimes[tid].set_idle(end)
         # elif table == "CUPTI_ACTIVITY_KIND_DRIVER":
         #     cbid = row[1]
         #     start = row[2]
@@ -200,7 +159,7 @@ def summary_new(ctx, filename, begin, end):
         #     process_id = row[4]
         #     thread_id = row[5]
         #     correlation_id = row[6]
-        if table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL" or table == "CUPTI_ACTIVITY_KIND_KERNEL":
+        elif table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL" or table == "CUPTI_ACTIVITY_KIND_KERNEL":
             start = row[6]
             end = row[7]
             device_id = row[9]
@@ -236,12 +195,16 @@ def summary_new(ctx, filename, begin, end):
             if start is not None:
                 any_gpu_kernel.update(start)
                 any_comm.update(start)
+                any_runtime.update(start)
                 exposed_gpu.update(start)
+                exposed_comm.update(start)
         else:
             if end is not None:
                 any_gpu_kernel.update(end)
                 any_comm.update(end)
+                any_runtime.update(end)
                 exposed_gpu.update(end)
+                exposed_comm.update(end)
 
     heap = Heap()
 
@@ -272,7 +235,14 @@ def summary_new(ctx, filename, begin, end):
         _, (table, row, op) = heap.pop()
         consume(table, row, op)
 
-    print("GPU KERNELS:         {}s".format(any_gpu_kernel.time/1e9))
+    print("Total Kernel Time: {}s".format(any_gpu_kernel.time/1e9))
     for gpu, timeline in gpu_kernels.items():
-        print("GPU {}: {}s".format(gpu, timeline.time/1e9))
-    print("EXPOSED GPU KERNELS: {}s".format(exposed_gpu.time/1e9))
+        print("GPU {} Kernel Time: {}s".format(gpu, timeline.time/1e9))
+    print("Total CUDA Runtime: {}s".format(any_runtime.time/1e9))
+    for tid, timeline in runtimes.items():
+        print("Thread {} Runtime: {}s".format(tid, timeline.time/1e9))
+    print("Total Communication Time: {}s".format(any_comm.time/1e9))
+    for tag, timeline in comms.items():
+        print("{} Communication Time: {}s".format(tag, timeline.time/1e9))
+    print("Total Exposed GPU Kernel Time: {}s".format(exposed_gpu.time/1e9))
+    print("Total Exposed Communication Time: {}s".format(exposed_comm.time/1e9))

@@ -2,6 +2,7 @@
 
 import sqlite3
 import logging
+from cupti.activity import Device
 
 logger = logging.getLogger(__name__)
 
@@ -11,9 +12,15 @@ class Db(object):
         # read-only
         uri_str = "file:"+filename+"?mode=ro"
         self.conn = sqlite3.connect(uri_str, uri=True)
+        self.version = self._get_version()
+        if self.version != 11:
+            logger.warn("Expecting version 11, Db may be unreliable")
 
     def get_cursor(self):
         return self.conn.cursor()
+
+    def _get_version(self):
+        return self.conn.execute("SELECT * from Version").fetchone()[0]
 
     def get_strings(self):
         """ read StringTable from an nvprof db"""
@@ -43,6 +50,13 @@ class Db(object):
 
     def num_rows(self, table_name):
         return self.conn.execute("SELECT Count(*) from {}".format(table_name)).fetchone()[0]
+
+    def get_devices(self):
+        # look for unique devices in CUPTI_ACTIVITY_KIND_DEVICE
+        devices = []
+        for row in self.conn.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_DEVICE"):
+            devices += [Device(id_=row[26])]
+        return devices
 
 
 loud = False
