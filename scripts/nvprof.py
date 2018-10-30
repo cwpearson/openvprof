@@ -33,26 +33,34 @@ class Db(object):
             col_str = "*"
         else:
             col_str = ",".join(columns)
-        return self.cursor.execute("SELECT {} from {}".format(col_str, table_name))
+        return self.conn.execute("SELECT {} from {}".format(col_str, table_name))
 
-    def multi_rows(self, table_names):
-        return MultiTableRows(self, table_names)
+    def multi_rows(self, table_names, start_ts=None, end_ts=None):
+        return MultiTableRows(self, table_names, start_ts=start_ts, end_ts=end_ts)
 
     def execute(self, s):
         return self.cursor.execute(s)
+
+    def num_rows(self, table_name):
+        return self.conn.execute("SELECT Count(*) from {}".format(table_name)).fetchone()[0]
 
 
 loud = False
 
 
 class MultiTableRows(object):
-    def __init__(self, db, tables):
+    def __init__(self, db, tables, start_ts=None, end_ts=None):
         self.cursors = {}
         self.next_rows = {}
         self.current_ts = 0
         for table in tables:
             cursor = db.get_cursor()
-            sql_cmd = "SELECT start,end,* FROM {} ORDER BY start".format(table)
+            sql_cmd = "SELECT start,end,* FROM {}".format(table)
+            if start_ts:
+                sql_cmd += " where start >= {}".format(start_ts)
+            if end_ts:
+                sql_cmd += " and end <= {}".format(end_ts)
+            sql_cmd += " ORDER BY start"
             logger.debug("executing {}".format(sql_cmd))
             cursor.execute(sql_cmd)
             logger.debug("done")
