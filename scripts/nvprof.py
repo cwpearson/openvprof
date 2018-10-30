@@ -97,7 +97,10 @@ class MultiTableRows(object):
                 next_row = row
 
         # table, the actual row, start, and end
-        return next_table, next_row[2:], next_row[0], next_row[1]
+        if next_table:
+            return next_table, next_row[2:], next_row[0], next_row[1]
+        else:
+            return None, None, None, None
 
     def __next__(self):
         # check all rows to see what the next time stamp is

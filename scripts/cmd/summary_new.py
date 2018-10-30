@@ -114,7 +114,7 @@ def summary_new(ctx, filename):
     for new_table, new_row, new_start, new_stop in db.multi_rows(tables):
 
         # consume priority queue operations until we reach the start of the next operation
-        print("consuming until", new_start)
+        # print("consuming until", new_start)
         while len(heap) and heap.peek()[0] <= new_start:
             _, (table, row, op) = heap.pop()
             #print("consuming", table, row, op)
