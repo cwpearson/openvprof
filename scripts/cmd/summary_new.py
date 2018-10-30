@@ -34,11 +34,6 @@ class Heap(object):
         return len(self.items)
 
 
-class State(Enum):
-    IDLE = 1
-    ACTIVE = 2
-
-
 class Timeline(object):
 
     def __init__(self, multi_active=True):
