@@ -41,15 +41,16 @@ class Timeline(object):
         self.time = 0.0
         self.active_start = None
         self.multi_active = multi_active
+        self.listeners = set()
 
-    def idle(self, ts):
+    def set_idle(self, ts):
         if not self.multi_active:
             assert self.num_active == 1
         self.num_active -= 1
         if self.num_active == 0:
             self.time += (ts - self.active_start)
 
-    def active(self, ts):
+    def set_active(self, ts):
         if not self.multi_active:
             if self.num_active != 0:
                 logger.error(
@@ -62,6 +63,33 @@ class Timeline(object):
     def is_active(self):
         return self.num_active > 0
 
+    def __or__(a, b):
+        ret = CombinedTimeline()
+
+    def prompt_listeners(self):
+        for l in self.listeners:
+            l.prompt()
+
+
+class CombinedTimeline(object):
+    def __init__(self, update_function):
+        """ update function is expected to return whether the combined timeline should be active"""
+        self.update_function = update_function
+        self.time = 0.0
+        self.actived_at = None
+        self.prev_active = False
+
+    def is_active(self):
+        return self.prev_active
+
+    def update(self, ts):
+        active = self.update_function()
+        if self.prev_active and not active:  # active -> idle
+            self.time += (ts - self.activated_at)
+        elif not self.prev_active and active:  # idle -> active
+            self.activated_at = ts
+        self.prev_active = active
+
 
 class NestedTimeline(object):
     def __init__(self):
@@ -69,10 +97,16 @@ class NestedTimeline(object):
         self.time = 0.0
 
     def _any_active(self):
-        return any(self.timelines[key].is_active() for key in self.timelines)
+        for _, timeline in self.timelines.items():
+            if timeline.is_active():
+                return True
+        return False
 
     def _all_idle(self):
-        return all(not self.timelines[key].is_active() for key in self.timelines)
+        for _, timeline in self.timelines.items():
+            if timeline.is_active():
+                return False
+        return True
 
     def set_active(self, key, ts):
         if not self._any_active():
@@ -121,59 +155,93 @@ def summary_new(ctx, filename, begin, end):
 
     iter_column = 'start'
 
-    total_runtime = 0
-    total_driver = 0
-    total_kernel = 0
-    total_memcpy = 0
-
     IDLE = 0
     BUSY = 1
     START = 'op_start'
     STOP = 'op_stop'
 
-    gpu_kernels = NestedTimeline()  # indexed by GPU
-    comm_states = NestedTimeline()  # indexed by GPU
-    driver_state = NestedTimeline()  # indexed by tid
-    runtime_states = NestedTimeline()  # indexed by tid
+    gpu_kernels = defaultdict(lambda: Timeline())  # indexed by GP
+    comms = defaultdict(lambda: Timeline())  # indexed by GPU
+    # driver_state = NestedTimeline()  # indexed by tid
+    # runtime_states = NestedTimeline()  # indexed by tid
+
+    any_gpu_kernel = CombinedTimeline(lambda: any(k.is_active()
+                                                  for _, k in gpu_kernels.items()))
+
+    any_comm = CombinedTimeline(lambda: any(c.is_active()
+                                            for _, c in comms.items()))
+
+    exposed_gpu = CombinedTimeline(lambda: any_gpu_kernel.is_active() and not (
+        any_comm.is_active()))
 
     queue = []
 
     def consume(table, row, op):
-        nonlocal total_runtime
-        nonlocal total_driver
+        nonlocal any_gpu_kernel
         nonlocal gpu_kernels
-        nonlocal total_memcpy
-        nonlocal runtime_states
+        nonlocal comms
+        nonlocal any_comm
 
-        if table == "CUPTI_ACTIVITY_KIND_RUNTIME":
-            start = row[2]
-            end = row[3]
-            tid = row[5]
-            if op == START:
-                runtime_states.set_active(tid, start)
-            else:
-                runtime_states.set_idle(tid, end)
+        start = None
+        end = None
+
+        # if table == "CUPTI_ACTIVITY_KIND_RUNTIME":
+        #     start = row[2]
+        #     end = row[3]
+        #     tid = row[5]
+        #     if op == START:
+        #         runtime_states.set_active(tid, start)
+        #     else:
+        #         runtime_states.set_idle(tid, end)
         # elif table == "CUPTI_ACTIVITY_KIND_DRIVER":
-            #cbid = row[1]
-            #start = row[2]
-            #end = row[3]
-            #process_id = row[4]
-            #thread_id = row[5]
-            #correlation_id = row[6]
-        elif table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL" or table == "CUPTI_ACTIVITY_KIND_KERNEL":
+        #     cbid = row[1]
+        #     start = row[2]
+        #     end = row[3]
+        #     process_id = row[4]
+        #     thread_id = row[5]
+        #     correlation_id = row[6]
+        if table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL" or table == "CUPTI_ACTIVITY_KIND_KERNEL":
             start = row[6]
             end = row[7]
             device_id = row[9]
             if op == START:
-                gpu_kernels.set_active(device_id, start)
+                gpu_kernels[device_id].set_active(start)
             else:
-                gpu_kernels.set_idle(device_id, end)
-        # elif table == "CUPTI_ACTIVITY_KIND_MEMCPY":
-        #     start = row[6]
-        #     end = row[7]
+                gpu_kernels[device_id].set_idle(end)
+        elif table == "CUPTI_ACTIVITY_KIND_MEMCPY":
+            src_kind = row[2]
+            dst_kind = row[3]
+            start = row[6]
+            end = row[7]
+            device_id = row[8]
+            if src_kind == cupti.activity_memory_kind.DEVICE:
+                src_tag = 'gpu' + str(device_id)
+            else:
+                src_tag = 'cpu'
+            if dst_kind == cupti.activity_memory_kind.DEVICE:
+                dst_tag = 'gpu' + str(device_id)
+            else:
+                dst_tag = 'cpu'
+            comm_id = src_tag + "-" + dst_tag
+            if op == START:
+                comms[comm_id].set_active(start)
+            else:
+                comms[comm_id].set_idle(end)
         # elif table == "CUPTI_ACTIVITY_KIND_MEMCPY2":
         #     start = row[6]
         #     end = row[7]
+
+        # for now, just update combined timelines after every row, since we don't know what kind of ops each combined timeline needs
+        if op == START:
+            if start is not None:
+                any_gpu_kernel.update(start)
+                any_comm.update(start)
+                exposed_gpu.update(start)
+        else:
+            if end is not None:
+                any_gpu_kernel.update(end)
+                any_comm.update(end)
+                exposed_gpu.update(end)
 
     heap = Heap()
 
@@ -204,6 +272,7 @@ def summary_new(ctx, filename, begin, end):
         _, (table, row, op) = heap.pop()
         consume(table, row, op)
 
-    if gpu_kernels.is_active():
-        logger.error("At least one GPU kernel never finished!")
-    print("GPU KERNELS: {}s".format(gpu_kernels.time))
+    print("GPU KERNELS:         {}s".format(any_gpu_kernel.time/1e9))
+    for gpu, timeline in gpu_kernels.items():
+        print("GPU {}: {}s".format(gpu, timeline.time/1e9))
+    print("EXPOSED GPU KERNELS: {}s".format(exposed_gpu.time/1e9))
