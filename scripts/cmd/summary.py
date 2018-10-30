@@ -65,11 +65,22 @@ class Segments(object):
         self.segments = [0.0 for i in range(num_segments)]
         self.segment_counts = [0 for i in range(len(self.segments))]
 
-    def zero(self):
+    def occupied(self, i):
+        """amount of Segment i that is occupied by spans"""
+        return self.segments[i]
+
+    def free(self, i):
+        """amount of Segment i that is free"""
+        return 1.0 - self.occupied(i)
+
+    def pop(self, i):
+        return self.segment_counts[i]
+
+    def zero():
         z = Segments()
         return z
 
-    def one(self):
+    def one():
         o = Segments()
         o.segments = [1.0 for e in z.segments]
         return o
@@ -77,6 +88,15 @@ class Segments(object):
     def __or__(a, b):
         new = copy.deepcopy(a)
         new |= b
+        return new
+
+    def __sub__(a, b):
+        """ return a track representing activity in a that does not overlap with b"""
+        assert len(a.segments) == len(b.segments)
+        # same as a overlapping with free time in b
+        new = copy.deepcopy(a)
+        for i in range(len(b.segments)):
+            new.add_coverage(i, b.occupied(i), b.pop(i))
         return new
 
     def __ior__(self, rhs):
@@ -440,16 +460,40 @@ def summary(ctx, filename, range_name):
 
     # union of all tracks
     any_track = AT.empty_track()
+
+    # union of GPU kernel tracks
+    gpu_kernel_track = AT.empty_track()
+    gpu_kernel_track_bar = AT.empty_track()  # anything that is not a GPU kernel
+
     any_track |= AT.runtime_track
+    gpu_kernel_track_bar |= AT.runtime_track
     for track_id in AT.comm_tracks:
-        any_track |= AT.comm_tracks[track_id]
+        track = AT.comm_tracks[track_id]
+        any_track |= track
+        gpu_kernel_track_bar |= track
     for track_id in AT.gpu_kernel_tracks:
-        any_track |= AT.gpu_kernel_tracks[track_id]
+        track = AT.gpu_kernel_tracks[track_id]
+        any_track |= track
+        gpu_kernel_track |= track
+
+    exposed_gpu_kernel_track = gpu_kernel_track - gpu_kernel_track_bar
+
+    _, _, _, sum_coverage = any_track.coverage_stats()
     absolute = (len(any_track.segments) - sum_coverage) * AT.segment_extent
     pct = absolute / (len(any_track.segments) * AT.segment_extent)
     print("No activity:            {} ({}%)".format(absolute, 100 * pct))
+
+    _, _, _, sum_coverage = gpu_kernel_track.coverage_stats()
+    absolute = sum_coverage * AT.segment_extent
+    pct = absolute / (len(gpu_kernel_track.segments) * AT.segment_extent)
+    print("GPU kernel activity:    {} ({}%)".format(absolute, 100 * pct))
+
+    _, _, _, sum_coverage = exposed_gpu_kernel_track.coverage_stats()
+    absolute = sum_coverage * AT.segment_extent
+    pct = absolute / (len(exposed_gpu_kernel_track.segments)
+                      * AT.segment_extent)
+    print("exposed kernels:        {} ({}%)".format(absolute, 100 * pct))
     print("exposed driver/runtime: UNIMPLEMENTED")
-    print("exposed kernels:        UNIMPLEMENTED")
     print("exposed transfer:       UNIMPLEMENTED")
     print("  h2d:                  UNIMPLEMENTED")
     print("  d2h:                  UNIMPLEMENTED")

@@ -10,6 +10,7 @@ import time
 
 import cmd.summary
 import cmd.list_ranges
+import cmd.summary_new
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +221,7 @@ cli.add_command(timeline)
 cli.add_command(driver_time)
 cli.add_command(kernel_time)
 cli.add_command(cmd.summary.summary)
+cli.add_command(cmd.summary_new.summary_new)
 cli.add_command(cmd.list_ranges.list_ranges)
 
 if __name__ == '__main__':
