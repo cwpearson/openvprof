@@ -120,8 +120,6 @@ def summary_new(ctx, filename, begin, end):
     any_gpu_kernel = reduce(
         operator.or_, gpu_kernels.values(), timeline.NeverActive())
 
-    print(str(any_gpu_kernel))
-
     any_comm = reduce(
         operator.or_, comms.values(), timeline.NeverActive())
 
@@ -129,8 +127,6 @@ def summary_new(ctx, filename, begin, end):
         operator.or_, runtimes.values(), timeline.NeverActive())
 
     exposed_gpu = any_gpu_kernel & ~ (any_comm | any_runtime)
-
-    print(str(exposed_gpu))
 
     exposed_comm = any_comm & ~ (any_gpu_kernel | any_runtime)
     exposed_runtime = any_runtime & ~ (any_gpu_kernel | any_comm)
@@ -210,7 +206,7 @@ def summary_new(ctx, filename, begin, end):
 
     loop_wall_start = None
     rows_read = 0
-    next_pct = 0
+    next_pct = 1
     progress_start = None
     last_record_end = 0
     first_record_start = None
@@ -225,14 +221,14 @@ def summary_new(ctx, filename, begin, end):
         last_record_end = max(last_record_end, new_stop)
 
         rows_read += 1
-        cur_pct = rows_read / total_rows * 100
-        if cur_pct > next_pct:
+        cur_pct = int(rows_read / total_rows * 100)
+        if cur_pct >= next_pct:
             avg_rows_per_sec = rows_read / (time.time() - loop_wall_start)
             eta = (total_rows - rows_read) / avg_rows_per_sec
             sys.stderr.write(
                 "{}% ({}/{} rows) ({}ns-{}ns) ({} rows/s) (eta {}s)\n".format(int(cur_pct), rows_read,
                                                                               total_rows, progress_start, new_stop, int(avg_rows_per_sec), int(eta)))
-            next_pct = ceil(cur_pct)
+            next_pct = cur_pct + 1
             sys.stderr.flush()
             progress_start = new_start
 
