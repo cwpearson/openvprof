@@ -8,10 +8,13 @@ logger = logging.getLogger(__name__)
 
 
 class Db(object):
-    def __init__(self, filename=None):
-        # read-only
-        uri_str = "file:"+filename+"?mode=ro"
-        self.conn = sqlite3.connect(uri_str, uri=True)
+    def __init__(self, filename=None, read_only=True):
+        if read_only:
+            # read-only
+            uri_str = "file:"+filename+"?mode=ro"
+            self.conn = sqlite3.connect(uri_str, uri=True)
+        else:
+            self.conn = sqlite3.connect(filename)
         self.version = self._get_version()
         if self.version != 11:
             logger.warn("Expecting version 11, Db may be unreliable")
@@ -21,6 +24,27 @@ class Db(object):
 
     def _get_version(self):
         return self.conn.execute("SELECT * from Version").fetchone()[0]
+
+    def _range_filter_string(ranges):
+        if not ranges:
+            return ""
+        filter_str = ""
+        for r in ranges:
+            if r[0] or r[1]:
+                filter_str = " WHERE"
+                break
+        for r in ranges:
+            if r[0] or r[1]:
+                filter_str += " ("
+                assert len(r) == 2
+                if r[0]:
+                    filter_str += " start >= {}".format(r[0])
+                if r[0] and r[1]:
+                    filter_str += " and "
+                if r[1]:
+                    filter_str += " end <= {}".format(r[1])
+                filter_str += ")"
+        return filter_str
 
     def get_strings(self):
         """ read StringTable from an nvprof db"""
@@ -46,10 +70,14 @@ class Db(object):
         return MultiTableRows(self, table_names, start_ts=start_ts, end_ts=end_ts)
 
     def execute(self, s):
-        return self.cursor.execute(s)
+        logger.debug("executing SQL: {}".format(s))
+        return self.conn.execute(s)
 
-    def num_rows(self, table_name):
-        return self.conn.execute("SELECT Count(*) from {}".format(table_name)).fetchone()[0]
+    def num_rows(self, table_name, ranges=None):
+        cmd = "SELECT Count(*) from {}".format(table_name)
+        cmd += Db._range_filter_string(ranges)
+        logger.debug("executing SQL: {}".format(cmd))
+        return self.conn.execute(cmd).fetchone()[0]
 
     def get_devices(self):
         # look for unique devices in CUPTI_ACTIVITY_KIND_DEVICE
@@ -57,6 +85,12 @@ class Db(object):
         for row in self.conn.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_DEVICE"):
             devices += [Device(id_=row[26])]
         return devices
+
+    def commit(self):
+        self.conn.commit()
+
+    def vacuum(self):
+        self.execute("vacuum")
 
 
 loud = False
@@ -70,10 +104,14 @@ class MultiTableRows(object):
         for table in tables:
             cursor = db.get_cursor()
             sql_cmd = "SELECT start,end,* FROM {}".format(table)
+            if start_ts or end_ts:
+                sql_cmd += " where"
             if start_ts:
-                sql_cmd += " where start >= {}".format(start_ts)
+                sql_cmd += " start >= {}".format(start_ts)
+            if start_ts and end_st:
+                sql_cmd += " and"
             if end_ts:
-                sql_cmd += " and end <= {}".format(end_ts)
+                sql_cmd += " end <= {}".format(end_ts)
             sql_cmd += " ORDER BY start"
             logger.debug("executing {}".format(sql_cmd))
             cursor.execute(sql_cmd)
