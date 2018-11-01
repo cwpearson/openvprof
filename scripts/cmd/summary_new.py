@@ -260,3 +260,6 @@ def summary_new(ctx, filename, begin, end):
     print("Total Exposed GPU Kernel Time: {}s".format(exposed_gpu.time/1e9))
     print("Total Exposed Communication Time: {}s".format(exposed_comm.time/1e9))
     print("Total Exposed Runtime Time: {}s".format(exposed_runtime.time/1e9))
+
+    print("Information about kernels")
+    print("Information about runtimes calls")
