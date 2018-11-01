@@ -8,6 +8,9 @@ from math import ceil
 from collections import defaultdict
 from enum import Enum
 import heapq
+import timeline
+import operator
+from functools import reduce
 
 import cupti.activity_memory_kind
 from nvprof import Db
@@ -32,28 +35,6 @@ class Heap(object):
 
     def __len__(self):
         return len(self.items)
-
-
-class Timeline(object):
-
-    def __init__(self):
-        self.num_active = 0
-        self.time = 0.0
-        self.active_start = None
-
-    def set_idle(self, ts):
-        self.num_active -= 1
-        assert self.num_active >= 0
-        if self.num_active == 0:
-            self.time += (ts - self.active_start)
-
-    def set_active(self, ts):
-        if self.num_active == 0:
-            self.active_start = ts
-        self.num_active += 1
-
-    def is_active(self):
-        return self.num_active > 0
 
 
 class CombinedTimeline(object):
@@ -93,6 +74,12 @@ def summary_new(ctx, filename, begin, end):
     nvprof_id_to_string, nvprof_string_to_id = db.get_strings()
     logger.debug("{} strings".format(len(nvprof_id_to_string)))
 
+    logger.debug("Loading thread ids")
+    tids = set()
+    for row in db.execute("SELECT distinct threadId from CUPTI_ACTIVITY_KIND_RUNTIME"):
+        tids.add(row[0])
+    logger.debug("{} thread IDs".format(len(tids)))
+
     if end:
         logger.debug("using end = {}".format(end))
     if begin:
@@ -116,28 +103,37 @@ def summary_new(ctx, filename, begin, end):
     STOP = 'op_stop'
 
     gpu_kernels = {}
+    runtimes = {}
+    comms = {}
     for d in devices:
-        gpu_kernels[d.id_] = Timeline()
-    runtimes = defaultdict(lambda: Timeline())  # indexed by tid
-    comms = defaultdict(lambda: Timeline())  # indexed by tid
+        gpu_kernels[d.id_] = timeline.Timeline()
+        comms["cpu-gpu" + str(d.id_)] = timeline.Timeline()
+        comms["gpu" + str(d.id_) + "-cpu"] = timeline.Timeline()
 
-    any_gpu_kernel = CombinedTimeline(lambda: any(k.is_active()
-                                                  for _, k in gpu_kernels.items()))
+        for d1 in devices:
+            comms["gpu" + str(d.id_) + "-gpu" + str(d1.id_)
+                  ] = timeline.Timeline()
 
-    any_comm = CombinedTimeline(lambda: any(c.is_active()
-                                            for _, c in comms.items()))
+    for t in tids:
+        runtimes[t] = timeline.Timeline()
 
-    any_runtime = CombinedTimeline(lambda: any(r.is_active()
-                                               for _, r in runtimes.items()))
+    any_gpu_kernel = reduce(
+        operator.or_, gpu_kernels.values(), timeline.NeverActive())
 
-    exposed_gpu = CombinedTimeline(lambda: any_gpu_kernel.is_active() and not (
-        any_comm.is_active() or any_runtime.is_active()))
+    print(str(any_gpu_kernel))
 
-    exposed_comm = CombinedTimeline(lambda: any_comm.is_active() and not (
-        any_gpu_kernel.is_active() or any_runtime.is_active()))
+    any_comm = reduce(
+        operator.or_, comms.values(), timeline.NeverActive())
 
-    exposed_runtime = CombinedTimeline(lambda: any_runtime.is_active() and not (
-        any_gpu_kernel.is_active() or any_comm.is_active()))
+    any_runtime = reduce(
+        operator.or_, runtimes.values(), timeline.NeverActive())
+
+    exposed_gpu = any_gpu_kernel & ~ (any_comm | any_runtime)
+
+    print(str(exposed_gpu))
+
+    exposed_comm = any_comm & ~ (any_gpu_kernel | any_runtime)
+    exposed_runtime = any_runtime & ~ (any_gpu_kernel | any_comm)
 
     queue = []
 
@@ -257,14 +253,14 @@ def summary_new(ctx, filename, begin, end):
 
     print("Wall Time: {}s".format((last_record_end - first_record_start) / 1e9))
     print("Slices with an active kernel: {}s".format(any_gpu_kernel.time/1e9))
-    for gpu, timeline in gpu_kernels.items():
-        print("GPU {} Kernel Time: {}s".format(gpu, timeline.time/1e9))
+    for gpu, t in gpu_kernels.items():
+        print("GPU {} Kernel Time: {}s".format(gpu, t.time/1e9))
     print("Slices in CUDA runtime: {}s".format(any_runtime.time/1e9))
-    # for tid, timeline in runtimes.items():
-    #     print("Thread {} Runtime: {}s".format(tid, timeline.time/1e9))
+    # for tid, t in runtimes.items():
+    #     print("Thread {} Runtime: {}s".format(tid, t.time/1e9))
     print("Slices with active communication: {}s".format(any_comm.time/1e9))
-    for tag, timeline in comms.items():
-        print("{} Communication Time: {}s".format(tag, timeline.time/1e9))
+    for tag, t in comms.items():
+        print("{} Communication Time: {}s".format(tag, t.time/1e9))
     print("Total Exposed GPU Kernel Time: {}s".format(exposed_gpu.time/1e9))
     print("Total Exposed Communication Time: {}s".format(exposed_comm.time/1e9))
     print("Total Exposed Runtime Time: {}s".format(exposed_runtime.time/1e9))

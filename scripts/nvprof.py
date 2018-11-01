@@ -108,7 +108,7 @@ class MultiTableRows(object):
                 sql_cmd += " where"
             if start_ts:
                 sql_cmd += " start >= {}".format(start_ts)
-            if start_ts and end_st:
+            if start_ts and end_ts:
                 sql_cmd += " and"
             if end_ts:
                 sql_cmd += " end <= {}".format(end_ts)
