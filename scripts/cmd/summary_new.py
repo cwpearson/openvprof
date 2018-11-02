@@ -154,13 +154,16 @@ def summary_new(ctx, filename, begin, end):
         #     thread_id = row[5]
         #     correlation_id = row[6]
         elif table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL" or table == "CUPTI_ACTIVITY_KIND_KERNEL":
+            # print("consuming GPU kernel")
             start = row[6]
             end = row[7]
             device_id = row[9]
+            # print(start, end, device_id, op)
             if op == START:
                 gpu_kernels[device_id].set_active(start)
             else:
                 gpu_kernels[device_id].set_idle(end)
+            # assert False
         elif table == "CUPTI_ACTIVITY_KIND_MEMCPY":
             src_kind = row[2]
             dst_kind = row[3]
@@ -185,22 +188,22 @@ def summary_new(ctx, filename, begin, end):
         #     end = row[7]
 
         # for now, just update combined timelines after every row, since we don't know what kind of ops each combined timeline needs
-        if op == START:
-            if start is not None:
-                any_gpu_kernel.update(start)
-                any_comm.update(start)
-                any_runtime.update(start)
-                exposed_gpu.update(start)
-                exposed_comm.update(start)
-                exposed_runtime.update(start)
-        else:
-            if end is not None:
-                any_gpu_kernel.update(end)
-                any_comm.update(end)
-                any_runtime.update(end)
-                exposed_gpu.update(end)
-                exposed_comm.update(end)
-                exposed_runtime.update(end)
+        # if op == START:
+        #     if start is not None:
+        #         any_gpu_kernel.update(start)
+        #         any_comm.update(start)
+        #         any_runtime.update(start)
+        #         exposed_gpu.update(start)
+        #         exposed_comm.update(start)
+        #         exposed_runtime.update(start)
+        # else:
+        #     if end is not None:
+        #         any_gpu_kernel.update(end)
+        #         any_comm.update(end)
+        #         any_runtime.update(end)
+        #         exposed_gpu.update(end)
+        #         exposed_comm.update(end)
+        #         exposed_runtime.update(end)
 
     heap = Heap()
 
