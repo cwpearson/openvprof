@@ -93,40 +93,30 @@ class Expr(object):
 class Timeline(Expr):
 
     def __init__(self):
-        self.num_active = 0
         self.time = 0.0
         self.activated_at = None
         self.parents = set()
 
     def set_idle(self, ts):
-        changed = False
-        self.num_active -= 1
-        assert self.num_active >= 0
-        if self.num_active == 0:
-            changed = True
-            self.time += (ts - self.activated_at)
-            self.activated_at = None
-        if changed:
-            for p in self.parents:
-                # print("base timeline busy->idle at",
-                #       ts, "informing parent", id(p))
-                p.child_changed(ts)
+        assert self.activated_at is not None
+        self.time += (ts - self.activated_at)
+        self.activated_at = None
+        for p in self.parents:
+            # print("base timeline busy->idle at",
+            #       ts, "informing parent", id(p))
+            p.child_changed(ts)
 
     def set_active(self, ts):
-        changed = False
-        if self.num_active == 0:
-            changed = True
-            self.activated_at = ts
-        self.num_active += 1
+        assert self.activated_at is None
+        self.activated_at = ts
 
-        if changed:
-            for p in self.parents:
-                # print("base timeline idle->busy at",
-                #       ts, "informing parent", id(p))
-                p.child_changed(ts)
+        for p in self.parents:
+            # print("base timeline idle->busy at",
+            #       ts, "informing parent", id(p))
+            p.child_changed(ts)
 
     def evaluate(self):
-        return self.num_active > 0
+        return self.activated_at is not None
 
     def __str__(self):
         return str(id(self))
