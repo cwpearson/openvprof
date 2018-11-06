@@ -6,6 +6,64 @@ from cupti.activity import Device
 
 logger = logging.getLogger(__name__)
 
+"""
+select Min(start) from
+(
+select Min(start) as start from CUPTI_ACTIVITY_KIND_DRIVER
+union
+select Min(start) as start from CUPTI_ACTIVITY_KIND_RUNTIME
+) as start
+"""
+
+
+class Expr(object):
+    def __str__(self):
+        pass
+
+
+class ResultColumn(object):
+    def __init__(self, expr=None, table_name=None):
+        self.expr = expr
+        self.table_name = table_name
+
+    def __str__(self):
+        if self.expr:
+            return str(self.expr)
+        elif self.table_name:
+            return str(self.table_name)
+        else:
+            return "*"
+
+
+class Select(object):
+    def __init__(
+        self,
+        table_or_subquery,
+        result_columns=[ResultColumn()],
+        where_expr=None,
+        ordering_terms=[],
+        distinct=False,
+        all=False,
+    ):
+        self.table_or_subquery = table_or_subquery
+        self.result_columns = result_columns
+        self.where_expr = where_expr
+        self.ordering_terms = ordering_terms
+        self.distinct = distinct
+        self.all = all
+
+    def __str__(self):
+        sql = " SELECT"
+        if self.distinct:
+            sql += " DISTINCT"
+        if self.all:
+            sql += " ALL"
+        sql += " " + ",".join(str(r) for r in self.result_columns)
+        sql += " FROM " + str(self.table_or_subquery)
+        if self.ordering_terms:
+            sql += " ORDER BY " + ",".join(str(o) for o in self.ordering_terms)
+        return sql
+
 
 class Db(object):
     def __init__(self, filename=None, read_only=True):
@@ -23,7 +81,31 @@ class Db(object):
         return self.conn.cursor()
 
     def _get_version(self):
-        return self.conn.execute("SELECT * from Version").fetchone()[0]
+        return self.conn.execute(str(Select("Version"))).fetchone()[0]
+
+    def get_first_start(self):
+        first = float('Inf')
+
+        def start_end_sql(t): return Select(
+            t, result_columns=[ResultColumn(expr="Min(start)")])
+
+        def timestamp_sql(t): return Select(
+            t, result_columns=[ResultColumn(expr="Min(timestamp)")])
+
+        start_end_tables = [
+            "CUPTI_ACTIVITY_KIND_RUNTIME",
+            "CUPTI_ACTIVITY_KIND_DRIVER",
+        ]
+        timestamp_tables = [
+            "CUPTI_ACTIVITY_KIND_MARKER"
+        ]
+        for t in start_end_tables:
+            sql = start_end_sql(t)
+            first = min(first, self.execute(str(sql)).fetchone()[0])
+        for t in timestamp_tables:
+            sql = timestamp_sql(t)
+            first = min(first, self.execute(str(sql)).fetchone()[0])
+        return first
 
     def _range_filter_string(ranges):
         if not ranges:
@@ -51,7 +133,8 @@ class Db(object):
         cursor = self.conn.cursor()
         id_to_string = {}
         string_to_id = {}
-        for row in cursor.execute('SELECT * FROM StringTable'):
+        cmd = Select("StringTable")
+        for row in cursor.execute(str(cmd)):
             id_, s = row
 
             id_to_string[id_] = s
@@ -59,11 +142,8 @@ class Db(object):
             string_to_id[s] = id_
         return id_to_string, string_to_id
 
-    def rows(self, table_name, columns=[]):
-        if not columns:
-            col_str = "*"
-        else:
-            col_str = ",".join(columns)
+    def rows(self, table_name, columns=['*']):
+        col_str = ",".join(columns)
         return self.conn.execute("SELECT {} from {}".format(col_str, table_name))
 
     def multi_rows(self, table_names, start_ts=None, end_ts=None):
