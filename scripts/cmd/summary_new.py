@@ -13,6 +13,7 @@ import operator
 from functools import reduce
 
 import cupti.activity_memory_kind
+import cupti.activity
 from nvprof import Db
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,35 @@ def summary_new(ctx, filename, begin, end):
 
     db = Db(filename)
 
+    first_timestamp = db.get_first_start()
+    logger.debug("First timestamp: {}".format(first_timestamp))
+
+    if end:
+        logger.debug("got --end = {}".format(end))
+        if end[-1] == "s":
+            end = first_timestamp + float(end[:-1]) * 1_000_000_000
+        end = int(end)
+        logger.debug("converted --end to ts {}".format(end))
+    if begin:
+        logger.debug("got --begin = {}".format(begin))
+        if begin[-1] == "s":
+            begin = first_timestamp + float(begin[:-1]) * 1_000_000_000
+        begin = int(begin)
+        logger.debug("converted --begin to ts {}".format(begin))
+    else:
+        logger.debug("using first timestamp in file as begin")
+        begin = first_timestamp
+
+    def normalize_to_nvprof(ts):
+        """ normalize all timestamps to the beginning of our analysis"""
+        adjusted = ts - first_timestamp
+        # assert adjusted >= 0
+        return adjusted
+
+    def normalize_to_begin(ts):
+        adjusted = ts - begin
+        return adjusted
+
     logger.debug("Loading devices")
     devices = db.get_devices()
     logger.debug("{} devices".format(len(devices)))
@@ -77,20 +107,22 @@ def summary_new(ctx, filename, begin, end):
     logger.debug("Loading thread ids")
     tids = set()
     for row in db.execute("SELECT distinct threadId from CUPTI_ACTIVITY_KIND_RUNTIME"):
-        tids.add(row[0])
+        tid = row[0]
+        if tid < 0:
+            tid += 2**32
+            assert tid >= 0
+        tids.add(tid)
     logger.debug("{} thread IDs".format(len(tids)))
-
-    if end:
-        logger.debug("using end = {}".format(end))
-    if begin:
-        logger.debug("using begin = {}".format(begin))
+    pids = set()
+    for row in db.execute("SELECT distinct processId from CUPTI_ACTIVITY_KIND_RUNTIME"):
+        pids.add(row[0])
+    logger.debug("{} process IDs".format(len(pids)))
 
     tables = [
         'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL',
         'CUPTI_ACTIVITY_KIND_MEMCPY',
         # 'CUPTI_ACTIVITY_KIND_MEMCPY2',
         'CUPTI_ACTIVITY_KIND_KERNEL',
-        # 'CUPTI_ACTIVITY_KIND_DRIVER',
         'CUPTI_ACTIVITY_KIND_RUNTIME',
     ]
 
@@ -114,8 +146,9 @@ def summary_new(ctx, filename, begin, end):
             comms["gpu" + str(d.id_) + "-gpu" + str(d1.id_)
                   ] = timeline.Timeline()
 
-    for t in tids:
-        runtimes[t] = timeline.Timeline()
+    for p in pids:
+        for t in tids:
+            runtimes[t] = timeline.Timeline()
 
     any_gpu_kernel = reduce(
         operator.or_, gpu_kernels.values(), timeline.NeverActive())
@@ -126,38 +159,51 @@ def summary_new(ctx, filename, begin, end):
     any_runtime = reduce(
         operator.or_, runtimes.values(), timeline.NeverActive())
 
-    exposed_gpu = any_gpu_kernel & ~ (any_comm | any_runtime)
+    exposed_gpu = any_gpu_kernel & (~ (any_comm | any_runtime))
+    exposed_comm = any_comm & (~ (any_gpu_kernel | any_runtime))
+    exposed_runtime_mask = ~ (any_gpu_kernel | any_comm)
+    exposed_runtime = any_runtime & exposed_runtime_mask
 
-    exposed_comm = any_comm & ~ (any_gpu_kernel | any_runtime)
-    exposed_runtime = any_runtime & ~ (any_gpu_kernel | any_comm)
-
+    any_runtime.verbose = True
+    any_runtime.name = "any_runtime"
+    any_gpu_kernel.verbose = True
+    any_gpu_kernel.name = "any_gpu_kernel"
+    # any_comm.verbose = True
+    any_comm.name = "any_comm"
+    exposed_runtime.verbose = True
+    exposed_runtime.name = "exposed_runtime"
+    exposed_runtime_mask.verbose = True
+    exposed_runtime_mask.name = "exposed_runtime_mask"
     queue = []
 
-    def consume(table, row, op):
+    def consume(ts, table, row, op):
 
         start = None
         end = None
+        ts = normalize_to_nvprof(ts)
+
+        record = None
 
         if table == "CUPTI_ACTIVITY_KIND_RUNTIME":
-            start = row[2]
-            end = row[3]
-            tid = row[5]
+            # print("consuming runtime", op)
+            cbid, start, end, pid, tid = row[1:6]
+            start = normalize_to_nvprof(start)
+            end = normalize_to_nvprof(end)
+            if tid < 0:
+                tid += 2**32
+            record = cupti.activity.Runtime(cbid, pid, tid)
             if op == START:
                 runtimes[tid].set_active(start)
             else:
                 runtimes[tid].set_idle(end)
-        # elif table == "CUPTI_ACTIVITY_KIND_DRIVER":
-        #     cbid = row[1]
-        #     start = row[2]
-        #     end = row[3]
-        #     process_id = row[4]
-        #     thread_id = row[5]
-        #     correlation_id = row[6]
         elif table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL" or table == "CUPTI_ACTIVITY_KIND_KERNEL":
-            # print("consuming GPU kernel")
+            # print("consuming GPU kernel", op)
             start = row[6]
             end = row[7]
+            start = normalize_to_nvprof(start)
+            end = normalize_to_nvprof(end)
             device_id = row[9]
+            record = None
             # print(start, end, device_id, op)
             if op == START:
                 gpu_kernels[device_id].set_active(start)
@@ -169,7 +215,10 @@ def summary_new(ctx, filename, begin, end):
             dst_kind = row[3]
             start = row[6]
             end = row[7]
+            start = normalize_to_nvprof(start)
+            end = normalize_to_nvprof(end)
             device_id = row[8]
+            record = None
             if src_kind == cupti.activity_memory_kind.DEVICE:
                 src_tag = 'gpu' + str(device_id)
             else:
@@ -187,23 +236,18 @@ def summary_new(ctx, filename, begin, end):
         #     start = row[6]
         #     end = row[7]
 
-        # for now, just update combined timelines after every row, since we don't know what kind of ops each combined timeline needs
-        # if op == START:
-        #     if start is not None:
-        #         any_gpu_kernel.update(start)
-        #         any_comm.update(start)
-        #         any_runtime.update(start)
-        #         exposed_gpu.update(start)
-        #         exposed_comm.update(start)
-        #         exposed_runtime.update(start)
-        # else:
-        #     if end is not None:
-        #         any_gpu_kernel.update(end)
-        #         any_comm.update(end)
-        #         any_runtime.update(end)
-        #         exposed_gpu.update(end)
-        #         exposed_comm.update(end)
-        #         exposed_runtime.update(end)
+        if op == START:
+            if isinstance(record, cupti.activity.Runtime):
+                any_runtime.start_record_if_active(ts, record)
+                exposed_runtime.start_record_if_active(ts, record)
+            elif isinstance(record, cupti.activity.Comm):
+                exposed_communication.start_record_if_active(ts, record)
+        if op == STOP:
+            if isinstance(record, cupti.activity.Runtime):
+                any_runtime.end_record(ts, record)
+                exposed_runtime.end_record(ts, record)
+            elif isinstance(record, cupti.activity.Comm):
+                exposed_communication.end_record(ts, record)
 
     heap = Heap()
 
@@ -214,6 +258,11 @@ def summary_new(ctx, filename, begin, end):
     last_record_end = 0
     first_record_start = None
     for new_table, new_row, new_start, new_stop in db.multi_rows(tables, start_ts=begin, end_ts=end):
+        # print("read", new_table, "at",
+        #       normalize_to_nvprof(new_start) / 1e9,
+        #       normalize_to_nvprof(new_stop) / 1e9)
+        # if new_stop:
+        #     assert new_stop <= end
         if not loop_wall_start:
             loop_wall_start = time.time()
         if not progress_start:
@@ -238,8 +287,8 @@ def summary_new(ctx, filename, begin, end):
         # consume priority queue operations until we reach the start of the next operation
         # print("consuming until", new_start)
         while len(heap) and heap.peek()[0] <= new_start:
-            _, (table, row, op) = heap.pop()
-            consume(table, row, op)
+            ts, (table, row, op) = heap.pop()
+            consume(ts, table, row, op)
 
         # push start and stop markers onto heap
         heap.push((new_table, new_row, START), new_start)
@@ -247,22 +296,44 @@ def summary_new(ctx, filename, begin, end):
 
     # finish up the heap
     while len(heap):
-        _, (table, row, op) = heap.pop()
-        consume(table, row, op)
+        ts, (table, row, op) = heap.pop()
+        consume(ts, table, row, op)
 
-    print("Wall Time: {}s".format((last_record_end - first_record_start) / 1e9))
-    print("Slices with an active kernel: {}s".format(any_gpu_kernel.time/1e9))
-    for gpu, t in gpu_kernels.items():
-        print("GPU {} Kernel Time: {}s".format(gpu, t.time/1e9))
-    print("Slices in CUDA runtime: {}s".format(any_runtime.time/1e9))
-    # for tid, t in runtimes.items():
-    #     print("Thread {} Runtime: {}s".format(tid, t.time/1e9))
-    print("Slices with active communication: {}s".format(any_comm.time/1e9))
+    print("Records cover: {}s".format(
+        (last_record_end - first_record_start) / 1e9))
+
+    print("Communication Report")
+    print("====================")
+    print("Any communication active: {}s".format(any_comm.time/1e9))
+    print("Any communication breakdown")
+    print("---------------------------")
     for tag, t in comms.items():
-        print("{} Communication Time: {}s".format(tag, t.time/1e9))
-    print("Total Exposed GPU Kernel Time: {}s".format(exposed_gpu.time/1e9))
+        print("  {} Communication Time: {}s".format(tag, t.time/1e9))
     print("Total Exposed Communication Time: {}s".format(exposed_comm.time/1e9))
+    print("Exposed communication breakdown")
+    print("-------------------------------")
+
+    print("Runtime Report")
+    print("==============")
     print("Total Exposed Runtime Time: {}s".format(exposed_runtime.time/1e9))
 
-    print("Information about kernels")
-    print("Information about runtimes calls")
+    print("Exposed Runtime Breakdown:")
+    print("------------------------------------")
+    runtime_times = sorted(
+        list(exposed_runtime.record_times.items()), key=lambda t: t[1], reverse=True)
+    for record, elapsed in runtime_times:
+        print("  {} {}s".format(str(record), elapsed / 1e9))
+    print("Any Runtime Active: {}s".format(any_runtime.time/1e9))
+    print("Breakdown")
+    print("------------------------")
+    runtime_times = sorted(
+        list(any_runtime.record_times.items()), key=lambda t: t[1], reverse=True)
+    for record, elapsed in runtime_times:
+        print("  {} {}s".format(str(record), elapsed / 1e9))
+
+    print("Kernel Report")
+    print("=============")
+    print("Total Exposed GPU Kernel Time: {}s".format(exposed_gpu.time/1e9))
+    print("Any Kernel Active: {}s".format(any_gpu_kernel.time/1e9))
+    for gpu, t in gpu_kernels.items():
+        print("GPU {} Kernel Time: {}s".format(gpu, t.time/1e9))

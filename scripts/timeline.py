@@ -1,4 +1,5 @@
 from enum import Enum
+from collections import defaultdict
 
 
 class Operator(Enum):
@@ -17,40 +18,79 @@ class Expr(object):
         self.rhs = rhs
         self.time = 0.0  # amount of time this has been active
         self.activated_at = None  # when this timeline last became busy, or None if idle
+        self.record_starts = {}
+        self.record_times = defaultdict(lambda: 0.0)
         if op == Operator.INV:
-            self.evaluate_func = lambda: not rhs.evaluate()
+            assert self.lhs is None
+            # self.evaluate_func = lambda: not self.rhs.evaluate()
+            self.evaluate_func = self.inv_eval_func
         elif op == Operator.AND:
-            self.evaluate_func = lambda: lhs.evaluate() and rhs.evaluate()
+            self.evaluate_func = self.and_eval_func
         else:
-            self.evaluate_func = lambda: lhs.evaluate() or rhs.evaluate()
+            self.evaluate_func = self.or_eval_func
 
-        if self.rhs:
+        if self.rhs is not None:
             self.rhs.add_parent(self)
-        if self.lhs:
+        if self.lhs is not None:
             self.lhs.add_parent(self)
 
+        self.verbose = False
+        self.name = str(id(self))
+
+        # update myself immediately so my initial value is correct
+        self.child_changed(0)
+
+    def inv_eval_func(self):
+        return not self.rhs.evaluate()
+
+    def or_eval_func(self):
+        return self.lhs.evaluate() or self.rhs.evaluate()
+
+    def and_eval_func(self):
+        return self.lhs.evaluate() and self.rhs.evaluate()
+
+    def start_record_if_active(self, ts, record):
+        if self.evaluate():
+            if record in self.record_starts:
+                print(record, "already marked as started")
+            assert record not in self.record_starts
+            self.record_starts[record] = ts
+
+    def end_record(self, ts, record):
+        if record in self.record_starts:  # may have already ended this record if it was the cause of the Expr going inactive
+            self.record_times[record] += ts - self.record_starts[record]
+            del self.record_starts[record]
+
     def evaluate(self):
-        """ we should have already been updated by our children if they changed"""
+        """we should have already been updated by our children if they changed"""
         return self.activated_at is not None
 
+    def print(self, *args, **kwargs):
+        if self.verbose:
+            print(*args, **kwargs)
+
     def child_changed(self, ts):
-        # print("me:", id(self))
-        # print("my child changed")
+        # self.print("child of", self.name, "changed")
         # if my child changed, evalute my new state
+        # if self.lhs:
+            # self.print("my lhs:", self.lhs.evaluate())
+        # self.print("my rhs:", self.rhs.evaluate())
         new_val = self.evaluate_func()
-        # print("i went from", self.activated_at, '->', new_val)
 
         # if I change, then we need to have our parents update as well
         changed = False
-        if new_val and self.activated_at is None:  # inactive to active
+        if not self.evaluate() and new_val:  # inactive to active
+            # self.print("idle -> busy")
             self.activated_at = ts
             changed = True
-            # print("idle -> busy")
-        elif not new_val and self.activated_at:  # active to inactive
+
+        elif self.evaluate() and not new_val:  # active to inactive
+            # self.print("busy -> idle")
             self.time += ts - self.activated_at
             self.activated_at = None
+            for record in list(self.record_starts.keys()):
+                self.end_record(ts, record)
             changed = True
-            # print("busy -> idle")
 
         # inform parents if I have changed
         if changed:
@@ -59,18 +99,6 @@ class Expr(object):
 
     def add_parent(self, parent):
         self.parents.add(parent)
-
-    def operands(self):
-        ret = []
-        if isinstance(self.lhs, Expr):
-            ret += [self.lhs.operands()]
-        else:
-            ret += [self.lhs]
-        if isinstance(self.rhs, Expr):
-            ret += [self.rhs.operands()]
-        else:
-            ret += [self.rhs]
-        return ret
 
     def __or__(self, other):
         return Expr(self, Operator.OR, other)

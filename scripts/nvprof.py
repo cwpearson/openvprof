@@ -3,6 +3,7 @@
 import sqlite3
 import logging
 from cupti.activity import Device
+import copy
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class Select(object):
     def __init__(
         self,
         table_or_subquery,
-        result_columns=[ResultColumn()],
+        result_columns=[],
         where_expr=None,
         ordering_terms=[],
         distinct=False,
@@ -53,16 +54,25 @@ class Select(object):
         self.all = all
 
     def __str__(self):
-        sql = " SELECT"
+        if not self.result_columns:
+            result_columns = [ResultColumn()]
+        else:
+            result_columns = self.result_columns
+        sql = "SELECT"
         if self.distinct:
             sql += " DISTINCT"
         if self.all:
             sql += " ALL"
-        sql += " " + ",".join(str(r) for r in self.result_columns)
+        sql += " " + ",".join(str(r) for r in result_columns)
         sql += " FROM " + str(self.table_or_subquery)
         if self.ordering_terms:
             sql += " ORDER BY " + ",".join(str(o) for o in self.ordering_terms)
         return sql
+
+    def ResultColumn(self, *args, **kwargs):
+        self.result_columns = list(
+            self.result_columns) + [ResultColumn(*args, **kwargs)]
+        return self
 
 
 class Db(object):
@@ -84,27 +94,32 @@ class Db(object):
         return self.conn.execute(str(Select("Version"))).fetchone()[0]
 
     def get_first_start(self):
+        """return the first timestamp found in a variety of tables"""
         first = float('Inf')
-
-        def start_end_sql(t): return Select(
-            t, result_columns=[ResultColumn(expr="Min(start)")])
-
-        def timestamp_sql(t): return Select(
-            t, result_columns=[ResultColumn(expr="Min(timestamp)")])
 
         start_end_tables = [
             "CUPTI_ACTIVITY_KIND_RUNTIME",
             "CUPTI_ACTIVITY_KIND_DRIVER",
+            "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL",
+            "CUPTI_ACTIVITY_KIND_MEMCPY",
+            "CUPTI_ACTIVITY_KIND_MEMCPY2",
+            "CUPTI_ACTIVITY_KIND_KERNEL",
         ]
         timestamp_tables = [
             "CUPTI_ACTIVITY_KIND_MARKER"
         ]
         for t in start_end_tables:
-            sql = start_end_sql(t)
-            first = min(first, self.execute(str(sql)).fetchone()[0])
+            sql = Select(t)
+            sql.ResultColumn(expr="Min(start)")
+            result = self.execute(sql).fetchone()[0]
+            if result:
+                first = min(first, result)
         for t in timestamp_tables:
-            sql = timestamp_sql(t)
-            first = min(first, self.execute(str(sql)).fetchone()[0])
+            sql = Select(t).ResultColumn(expr="Min(timestamp)")
+            first = min(first, self.execute(sql).fetchone()[0])
+            result = self.execute(sql).fetchone()[0]
+            if result:
+                first = min(first, result)
         return first
 
     def _range_filter_string(ranges):
@@ -150,6 +165,7 @@ class Db(object):
         return MultiTableRows(self, table_names, start_ts=start_ts, end_ts=end_ts)
 
     def execute(self, s):
+        s = str(s)
         logger.debug("executing SQL: {}".format(s))
         return self.conn.execute(s)
 
@@ -187,11 +203,11 @@ class MultiTableRows(object):
             if start_ts or end_ts:
                 sql_cmd += " where"
             if start_ts:
-                sql_cmd += " start >= {}".format(start_ts)
+                sql_cmd += " end >= {}".format(start_ts)
             if start_ts and end_ts:
                 sql_cmd += " and"
             if end_ts:
-                sql_cmd += " end <= {}".format(end_ts)
+                sql_cmd += " start <= {}".format(end_ts)
             sql_cmd += " ORDER BY start"
             logger.debug("executing {}".format(sql_cmd))
             cursor.execute(sql_cmd)
