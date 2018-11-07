@@ -67,28 +67,28 @@ def summary_new(ctx, filename, begin, end):
 
     db = Db(filename)
 
-    first_timestamp = db.get_first_start()
-    logger.debug("First timestamp: {}".format(first_timestamp))
+    nvprof_start_timestamp = db.get_first_start()
+    logger.debug("First timestamp: {}".format(nvprof_start_timestamp))
 
     if end:
         logger.debug("got --end = {}".format(end))
         if end[-1] == "s":
-            end = first_timestamp + float(end[:-1]) * 1_000_000_000
+            end = nvprof_start_timestamp + float(end[:-1]) * 1_000_000_000
         end = int(end)
         logger.debug("converted --end to ts {}".format(end))
     if begin:
         logger.debug("got --begin = {}".format(begin))
         if begin[-1] == "s":
-            begin = first_timestamp + float(begin[:-1]) * 1_000_000_000
+            begin = nvprof_start_timestamp + float(begin[:-1]) * 1_000_000_000
         begin = int(begin)
         logger.debug("converted --begin to ts {}".format(begin))
     else:
         logger.debug("using first timestamp in file as begin")
-        begin = first_timestamp
+        begin = nvprof_start_timestamp
 
     def normalize_to_nvprof(ts):
         """ normalize all timestamps to the beginning of our analysis"""
-        adjusted = ts - first_timestamp
+        adjusted = ts - nvprof_start_timestamp
         # assert adjusted >= 0
         return adjusted
 
@@ -315,10 +315,18 @@ def summary_new(ctx, filename, begin, end):
 
     print("Runtime Report")
     print("==============")
-    print("Total Exposed Runtime Time: {}s".format(exposed_runtime.time/1e9))
+    print("Total time CUDA Runtime Exposed: {}s".format(exposed_runtime.time/1e9))
 
-    print("Exposed Runtime Breakdown:")
-    print("------------------------------------")
+    print("Exposed Runtime by Thread:")
+    print("--------------------------")
+    print("(how much of the exposed time each thread is active for)")
+
+    print("Exposed Runtime by Call:")
+    print("------------------------")
+    print("(how much of the exposed time each API is active for)")
+
+    print("Exposed Runtime by Record:")
+    print("--------------------------")
     runtime_times = sorted(
         list(exposed_runtime.record_times.items()), key=lambda t: t[1], reverse=True)
     for record, elapsed in runtime_times:

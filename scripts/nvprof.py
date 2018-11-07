@@ -18,8 +18,11 @@ select Min(start) as start from CUPTI_ACTIVITY_KIND_RUNTIME
 
 
 class Expr(object):
-    def __str__(self):
-        pass
+    def __init__(self, s):
+        self.s = s
+
+    def __str__(self, s):
+        return str(self.s)
 
 
 class ResultColumn(object):
@@ -72,6 +75,10 @@ class Select(object):
     def ResultColumn(self, *args, **kwargs):
         self.result_columns = list(
             self.result_columns) + [ResultColumn(*args, **kwargs)]
+        return self
+
+    def Where(self, *args, **kwargs):
+        self.where_expr = Expr(*args, **kwargs)
         return self
 
 
@@ -135,15 +142,18 @@ class Db(object):
                 filter_str += " ("
                 assert len(r) == 2
                 if r[0]:
-                    filter_str += " start >= {}".format(r[0])
+                    filter_str += " end >= {}".format(r[0])
                 if r[0] and r[1]:
                     filter_str += " and "
                 if r[1]:
-                    filter_str += " end <= {}".format(r[1])
+                    filter_str += " start <= {}".format(r[1])
                 filter_str += ")"
         return filter_str
 
     def get_strings(self):
+        return self.read_strings()
+
+    def read_strings(self):
         """ read StringTable from an nvprof db"""
         cursor = self.conn.cursor()
         id_to_string = {}
@@ -151,7 +161,6 @@ class Db(object):
         cmd = Select("StringTable")
         for row in cursor.execute(str(cmd)):
             id_, s = row
-
             id_to_string[id_] = s
             assert s not in string_to_id
             string_to_id[s] = id_
@@ -188,8 +197,15 @@ class Db(object):
     def vacuum(self):
         self.execute("vacuum")
 
+    def add_range(self, name, domain, start, stop):
+        self.add_marker(name, domain, start)
+        self.add_marker(name, domain, stop)
 
-loud = False
+    def add_marker(name, domain, ts):
+        raise NotImplementedError
+        # make sure name is in strings table
+        # make sure domain is in strings table
+        # add marker
 
 
 class MultiTableRows(object):
@@ -210,14 +226,15 @@ class MultiTableRows(object):
                 sql_cmd += " start <= {}".format(end_ts)
             sql_cmd += " ORDER BY start"
             logger.debug("executing {}".format(sql_cmd))
+            # read the first row
             cursor.execute(sql_cmd)
-            logger.debug("done")
-            self.cursors[table] = cursor
-            self.next_rows[table] = cursor.fetchone()
+            next_row = cursor.fetchone()
+            # if there is a row, keep this cursor
+            if next_row is not None:
+                self.cursors[table] = cursor
+                self.next_rows[table] = next_row
         for table in self.next_rows:
             row = self.next_rows[table]
-            if not row:
-                continue
             if not self.current_ts:
                 self.current_ts = row[0]
             self.current_ts = min(self.current_ts, row[0])
@@ -230,13 +247,14 @@ class MultiTableRows(object):
         next_table = None
         next_row = None
 
-        to_remove = []
-        for table in self.next_rows:
-            if self.next_rows[table] is None:
-                to_remove += [table]
-        for table in to_remove:
-            del(self.next_rows[table])
+        # to_remove = []
+        # for table in self.next_rows:
+        #     if self.next_rows[table] is None:
+        #         to_remove += [table]
+        # for table in to_remove:
+        #     del(self.next_rows[table])
 
+        # search all tables for the soonest timestamp
         for table in self.next_rows:
             row = self.next_rows[table]
 
@@ -252,6 +270,16 @@ class MultiTableRows(object):
                 next_table = table
                 next_row = row
 
+        # if we found a next row, read the future next_row from the db
+        # if there is no future next row, discard the table
+        if next_table is not None:
+            future_row = self.cursors[next_table].fetchone()
+            if future_row is not None:
+                self.next_rows[next_table] = future_row
+            else:
+                del(self.next_rows[next_table])
+                del(self.cursors[next_table])
+
         # table, the actual row, start, and end
         if next_table:
             return next_table, next_row[2:], next_row[0], next_row[1]
@@ -259,7 +287,7 @@ class MultiTableRows(object):
             return None, None, None, None
 
     def __next__(self):
-        # check all rows to see what the next time stamp is
+        # get the table and row for the next time stamp
         table, row, start, end = self.get_next_row(self.current_ts)
         if not table:
             raise StopIteration
@@ -267,11 +295,8 @@ class MultiTableRows(object):
         # print(table, row, ts, self.current_ts)
         assert start >= self.current_ts
 
-        # get the next row from the table that has the next row
-        self.next_rows[table] = self.cursors[table].fetchone()
-
         # update the current timestamp
-        assert(start is not None)
+        assert start is not None
         self.current_ts = start
 
         # return the table that produced the row, and the row
