@@ -1,6 +1,6 @@
 import click
 import logging
-from nvprof import Db
+from nvprof.db import Db
 from datetime import datetime
 
 logger = logging.getLogger(__name__)

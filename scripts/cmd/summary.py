@@ -7,7 +7,7 @@ import time
 from math import ceil
 
 import cupti.activity_memory_kind
-from nvprof import Db
+from nvprof.db import Db
 
 logger = logging.getLogger(__name__)
 

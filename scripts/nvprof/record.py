@@ -7,19 +7,49 @@ class Device(object):
 
 
 RUNTIME_CBID_NAME = {
+    3: "cudaGetDeviceCount",
     4: "cudaGetDeviceProperties",
+    10: "cudaGetLastError",
+    16: "cudaSetDevice",
+    17: "cudaGetDevice",
     20: "cudaMalloc",
     22: "cudaFree",
     27: "cudaHostAlloc",
+    28: "cudaHostGetDevicePointer",
+    31: "cudaMemcpy",
     41: "cudaMemcpyAsync",
+    51: "cudaMemsetAsync",
+    55: "cudaBindTexture",
+    58: "cudaUnbindTexture",
+    133: "cudaEventCreate",
+    134: "cudaEventCreateWithFlags",
     135: "cudaEventRecord",
+    136: "cudaEventDestroy",
+    147: "cudaStreamWaitEvent",
+    197: "cudaStreamAddCallback",
     198: "cudaStreamCreateWithFlags",
+    200: "cudaDeviceGetAttribute",
+    202: "cudaStreamCreateWithPriority",
+    205: "cudaDeviceGetStreamPriorityRange",
     211: "cudaLaunchKernel",
+    273: "cudaFuncSetAttribute",
 }
 
 
-class Runtime(namedtuple('Runtime', ['cbid', 'pid', 'tid'])):
+class Runtime(namedtuple('Runtime', ['cbid', 'start', 'end', 'pid', 'tid', 'correlation_id', 'return_value'])):
     __slots__ = ()
+
+    def from_nvprof_row(row):
+        tid = row[5]
+        if tid < 2**32:
+            tid += 2**32
+        return Runtime(*row[1:5], tid, *row[6:])
+
+    def name(self):
+        if self.cbid in RUNTIME_CBID_NAME:
+            return RUNTIME_CBID_NAME[self.cbid]
+        else:
+            return str(self.cbid)
 
     def __str__(self):
         s = "Runtime::" + str(self.pid) + "::" + str(self.tid) + "::"
@@ -30,10 +60,12 @@ class Runtime(namedtuple('Runtime', ['cbid', 'pid', 'tid'])):
         return s
 
 
-assert Runtime(1, 1, 1) == Runtime(1, 1, 1)
-test_dict = {}
-test_dict[Runtime(1, 1, 1)] = 0
-assert Runtime(1, 1, 1) in test_dict
+class ConcurrentKernel(namedtuple('ConcurrentKernel', ['start', 'end', 'completed', 'device_id', 'name'])):
+    __slots__ = ()
+
+    def from_nvprof_row(row, strings):
+        return ConcurrentKernel(*row[6:10], strings[row[24]])
+
 
 """
 

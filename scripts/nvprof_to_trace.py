@@ -12,6 +12,7 @@ import cmd.summary
 import cmd.list_ranges
 import cmd.summary_new
 import cmd.filter
+import cmd.list_records
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +225,7 @@ cli.add_command(kernel_time)
 cli.add_command(cmd.summary.summary)
 cli.add_command(cmd.summary_new.summary_new)
 cli.add_command(cmd.list_ranges.list_ranges)
+cli.add_command(cmd.list_records.list_records)
 cli.add_command(cmd.filter.filter)
 
 if __name__ == '__main__':

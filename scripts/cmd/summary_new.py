@@ -13,8 +13,8 @@ import operator
 from functools import reduce
 
 import cupti.activity_memory_kind
-import cupti.activity
-from nvprof import Db
+import nvprof.record
+from nvprof.db import Db
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +191,7 @@ def summary_new(ctx, filename, begin, end):
             end = normalize_to_nvprof(end)
             if tid < 0:
                 tid += 2**32
-            record = cupti.activity.Runtime(cbid, pid, tid)
+            record = nvprof.record.Runtime.from_nvprof_row(row)
             if op == START:
                 runtimes[tid].set_active(start)
             else:
@@ -237,16 +237,16 @@ def summary_new(ctx, filename, begin, end):
         #     end = row[7]
 
         if op == START:
-            if isinstance(record, cupti.activity.Runtime):
+            if isinstance(record, nvprof.record.Runtime):
                 any_runtime.start_record_if_active(ts, record)
                 exposed_runtime.start_record_if_active(ts, record)
-            elif isinstance(record, cupti.activity.Comm):
+            elif isinstance(record, nvprof.record.Comm):
                 exposed_communication.start_record_if_active(ts, record)
         if op == STOP:
-            if isinstance(record, cupti.activity.Runtime):
+            if isinstance(record, nvprof.record.Runtime):
                 any_runtime.end_record(ts, record)
                 exposed_runtime.end_record(ts, record)
-            elif isinstance(record, cupti.activity.Comm):
+            elif isinstance(record, nvprof.record.Comm):
                 exposed_communication.end_record(ts, record)
 
     heap = Heap()

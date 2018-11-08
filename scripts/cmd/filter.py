@@ -1,7 +1,7 @@
 from shutil import copyfile
 import logging
 import click
-from nvprof import Db
+from nvprof.db import Db
 import os
 
 logger = logging.getLogger(__name__)
