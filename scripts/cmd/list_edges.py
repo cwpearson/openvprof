@@ -17,6 +17,9 @@ def list_edges(ctx, filename, relative):
     tables = [
         'CUPTI_ACTIVITY_KIND_RUNTIME',
         'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL',
+        'CUPTI_ACTIVITY_KIND_MEMCPY',
+        'CUPTI_ACTIVITY_KIND_MEMCPY2',
+        'CUPTI_ACTIVITY_KIND_MARKER',
     ]
 
     if relative:

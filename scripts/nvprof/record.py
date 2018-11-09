@@ -67,8 +67,22 @@ class ConcurrentKernel(namedtuple('ConcurrentKernel', ['start', 'end', 'complete
         return ConcurrentKernel(*row[6:10], strings[row[24]])
 
 
-"""
+class Memcpy(namedtuple('Memcpy', ['copy_kind', 'src_kind', 'dst_kind', 'bytes', 'start', 'end', 'device_id'])):
+    __slots__ = ()
 
+    def from_nvprof_row(row):
+        return Memcpy(*row[1:4], *row[5:9])
+
+
+class Marker(namedtuple('Marker', ['timestamp', 'name'])):
+    __slots__ = ()
+
+    def from_nvprof_row(row, strings):
+        return Marker(row[2], strings[row[6]])
+
+
+"""
+cbids for runtime functions
 // *************************************************************************
 //      Definitions of indices for API functions, unique across entire API
 // *************************************************************************

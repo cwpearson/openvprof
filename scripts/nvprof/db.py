@@ -2,7 +2,7 @@
 
 import sqlite3
 import logging
-from nvprof.record import Device, Runtime, ConcurrentKernel
+from nvprof.record import Device, Runtime, ConcurrentKernel, Memcpy, Marker
 from nvprof.sql import Select
 import copy
 
@@ -165,10 +165,22 @@ class Db(object):
         def _start_end_negedge(table):
             return "select end as ts, 0 as edge, * from {}".format(table)
 
+        def _marker_posedge(table):
+            return "SELECT timestamp as ts, 1 as edge, * FROM {} where flags == 2".format(table)
+
+        def _marker_negedge(table):
+            return "SELECT timestamp as ts, 0 as edge, * FROM {} where flags == 4".format(table)
+
+        if table == 'CUPTI_ACTIVITY_KIND_MARKER':
+            posedge_func = _marker_posedge
+            negedge_func = _marker_negedge
+        else:
+            posedge_func = _start_end_posedge
+            negedge_func = _start_end_negedge
         sql = "select * from ("
-        sql += "\n" + _start_end_posedge(table)
+        sql += "\n" + posedge_func(table)
         sql += "\n" + "UNION ALL"
-        sql += "\n" + _start_end_negedge(table)
+        sql += "\n" + negedge_func(table)
         sql += "\n) order by ts"
         return self.execute(sql)
 
@@ -215,6 +227,10 @@ class Db(object):
                 yield edge[1], Runtime.from_nvprof_row(edge[2:])
             elif table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL":
                 yield edge[1], ConcurrentKernel.from_nvprof_row(edge[2:], strings)
+            elif table == "CUPTI_ACTIVITY_KIND_MEMCPY":
+                yield edge[1], Memcpy.from_nvprof_row(edge[2:])
+            elif table == "CUPTI_ACTIVITY_KIND_MARKER":
+                yield edge[1], Marker.from_nvprof_row(edge[2:], strings)
 
 
 class MultiTableRows(object):
