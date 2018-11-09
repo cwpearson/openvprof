@@ -178,6 +178,10 @@ def summary_new(ctx, filename, begin, end):
 
     def consume(ts, table, row, op):
 
+        assert ts
+        assert table
+        assert row
+        assert op
         start = None
         end = None
         ts = normalize_to_nvprof(ts)
@@ -186,16 +190,11 @@ def summary_new(ctx, filename, begin, end):
 
         if table == "CUPTI_ACTIVITY_KIND_RUNTIME":
             # print("consuming runtime", op)
-            cbid, start, end, pid, tid = row[1:6]
-            start = normalize_to_nvprof(start)
-            end = normalize_to_nvprof(end)
-            if tid < 0:
-                tid += 2**32
             record = nvprof.record.Runtime.from_nvprof_row(row)
             if op == START:
-                runtimes[tid].set_active(start)
+                runtimes[tid].set_active(ts)
             else:
-                runtimes[tid].set_idle(end)
+                runtimes[tid].set_idle(ts)
         elif table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL" or table == "CUPTI_ACTIVITY_KIND_KERNEL":
             # print("consuming GPU kernel", op)
             start = row[6]

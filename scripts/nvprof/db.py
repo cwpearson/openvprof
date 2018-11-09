@@ -112,7 +112,8 @@ class Db(object):
     def execute(self, s):
         s = str(s)
         logger.debug("executing SQL: {}".format(s))
-        return self.conn.execute(s)
+        cursor = self.conn.cursor()
+        return cursor.execute(s)
 
     def num_rows(self, table_name, ranges=None):
         cmd = "SELECT Count(*) from {}".format(table_name)
@@ -155,6 +156,65 @@ class Db(object):
                     yield ConcurrentKernel.from_nvprof_row(row, strings)
                 else:
                     logger.warning("unhandled table {}".format(table))
+
+    def edges(self, table):
+
+        def _start_end_posedge(table):
+            return "select start as ts, 1 as edge, * from {}".format(table)
+
+        def _start_end_negedge(table):
+            return "select end as ts, 0 as edge, * from {}".format(table)
+
+        sql = "select * from ("
+        sql += "\n" + _start_end_posedge(table)
+        sql += "\n" + "UNION ALL"
+        sql += "\n" + _start_end_negedge(table)
+        sql += "\n) order by ts"
+        return self.execute(sql)
+
+    def multi_edges(self, table_names):
+        edges = {}
+        next_edges = {}
+        for table in table_names:
+            edges[table] = self.edges(table)
+            next_edges[table] = edges[table].fetchone()
+
+        while True:
+            # clean up any tables that have no more rows
+            to_remove = []
+            for table, edge in next_edges.items():
+                if edge is None:
+                    to_remove += [table]
+            for table in to_remove:
+                logger.debug("no more rows in {}".format(table))
+                del(edges[table])
+                del(next_edges[table])
+
+            yield_edge = None
+            yield_table = None
+            for table, edge in next_edges.items():
+                if not yield_table:
+                    yield_edge = edge
+                    yield_table = table
+                else:
+                    if edge[0] < yield_edge[0]:
+                        yield_edge = edge
+                        yield_table = table
+            if not yield_table:
+                break
+
+            next_edges[yield_table] = edges[yield_table].fetchone()
+            yield yield_table, yield_edge
+
+    def multi_edges_records(self, table_names):
+
+        strings, _ = self.get_strings()
+
+        for table, edge in self.multi_edges(table_names):
+            if table == "CUPTI_ACTIVITY_KIND_RUNTIME":
+                yield edge[1], Runtime.from_nvprof_row(edge[2:])
+            elif table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL":
+                yield edge[1], ConcurrentKernel.from_nvprof_row(edge[2:], strings)
 
 
 class MultiTableRows(object):
