@@ -2,9 +2,10 @@
 
 import sqlite3
 import logging
-from nvprof.record import Device, Runtime, ConcurrentKernel, Memcpy, Marker
+from nvprof.record import Device, Runtime, ConcurrentKernel, Memcpy, Range
 from nvprof.sql import Select
 import copy
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,32 @@ class Db(object):
         if self.version != 11:
             logger.warn("Expecting version 11, Db may be unreliable")
 
+        # create an abstraction over CUPTI markers that describe a time range that mirrors other CUPTI types
+        self._create_range_table()
+
+    def __del__(self):
+        self._release_range_table()
+
+    def _create_range_table(self):
+        sql = """
+CREATE TEMPORARY TABLE CUPTI_ACTIVITY_KIND_RANGE AS
+WITH rows AS (
+    SELECT start, end, name, domain from (
+    SELECT 
+    count(*) as num_markers, 
+    Min(timestamp) as start,
+    Max(timestamp) as end,
+    Max(name) as name,
+    domain
+    FROM CUPTI_ACTIVITY_KIND_MARKER group by id
+    ) where num_markers == 2
+) SELECT * FROM rows"""
+        self.execute(sql)
+
+    def _release_range_table(self):
+        sql = "DROP TABLE CUPTI_ACTIVITY_KIND_RANGE"
+        self.execute(sql)
+
     def get_cursor(self):
         return self.conn.cursor()
 
@@ -47,19 +74,12 @@ class Db(object):
             "CUPTI_ACTIVITY_KIND_MEMCPY",
             "CUPTI_ACTIVITY_KIND_MEMCPY2",
             "CUPTI_ACTIVITY_KIND_KERNEL",
+            'CUPTI_ACTIVITY_KIND_RANGE',
         ]
-        timestamp_tables = [
-            "CUPTI_ACTIVITY_KIND_MARKER"
-        ]
+
         for t in start_end_tables:
             sql = Select(t)
             sql.ResultColumn(expr="Min(start)")
-            result = self.execute(sql).fetchone()[0]
-            if result:
-                first = min(first, result)
-        for t in timestamp_tables:
-            sql = Select(t).ResultColumn(expr="Min(timestamp)")
-            first = min(first, self.execute(sql).fetchone()[0])
             result = self.execute(sql).fetchone()[0]
             if result:
                 first = min(first, result)
@@ -154,8 +174,11 @@ class Db(object):
                     yield Runtime.from_nvprof_row(row)
                 elif table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL":
                     yield ConcurrentKernel.from_nvprof_row(row, strings)
+                elif table == "CUPTI_ACTIVITY_KIND_RANGE":
+                    yield Range.from_nvprof_row(row, strings)
                 else:
-                    logger.warning("unhandled table {}".format(table))
+                    logger.error("unhandled table {}".format(table))
+                    raise SystemExit(-1)
 
     def edges(self, table, start_ts=None, end_ts=None):
 
@@ -167,30 +190,14 @@ class Db(object):
         if end_ts:
             sql_start_end_where += " where start <= {}", format(end_ts)
 
-        timestamp_where = ""
-        if start_ts:
-            timestamp_where += " and where timestamp >= {}".format(start_ts)
-        if end_ts:
-            timestamp_where += " and where timestamp <= {}", format(end_ts)
-
         def _start_end_posedge(table):
             return "select start as ts, 1 as edge, * from {}{}".format(table, sql_start_end_where)
 
         def _start_end_negedge(table):
             return "select end as ts, 0 as edge, * from {}{}".format(table, sql_start_end_where)
 
-        def _marker_posedge(table):
-            return "SELECT timestamp as ts, 1 as edge, * FROM {} where flags == 2{}".format(table, timestamp_where)
-
-        def _marker_negedge(table):
-            return "SELECT timestamp as ts, 0 as edge, * FROM {} where flags == 4{}".format(table, timestamp_where)
-
-        if table == 'CUPTI_ACTIVITY_KIND_MARKER':
-            posedge_func = _marker_posedge
-            negedge_func = _marker_negedge
-        else:
-            posedge_func = _start_end_posedge
-            negedge_func = _start_end_negedge
+        posedge_func = _start_end_posedge
+        negedge_func = _start_end_negedge
         sql = "select * from ("
         sql += "\n" + posedge_func(table)
         sql += "\n" + "UNION ALL"
@@ -243,8 +250,8 @@ class Db(object):
                 yield edge[0], edge[1], ConcurrentKernel.from_nvprof_row(edge[2:], strings)
             elif table == "CUPTI_ACTIVITY_KIND_MEMCPY":
                 yield edge[0], edge[1], Memcpy.from_nvprof_row(edge[2:])
-            elif table == "CUPTI_ACTIVITY_KIND_MARKER":
-                yield edge[0], edge[1], Marker.from_nvprof_row(edge[2:], strings)
+            elif table == "CUPTI_ACTIVITY_KIND_RANGES":
+                yield edge[0], edge[1], Range.from_nvprof_row(edge[2:], strings)
 
 
 class MultiTableRows(object):

@@ -21,13 +21,17 @@ RUNTIME_CBID_NAME = {
     51: "cudaMemsetAsync",
     55: "cudaBindTexture",
     58: "cudaUnbindTexture",
+    129: "cudaStreamCreate",
+    131: "cudaStreamSynchronize",
     133: "cudaEventCreate",
     134: "cudaEventCreateWithFlags",
     135: "cudaEventRecord",
     136: "cudaEventDestroy",
+    137: "cudaEventSynchronize",
     147: "cudaStreamWaitEvent",
     152: "cudaHostRegister",
     153: "cudaHostUnregister",
+    165: "cudaDeviceSynchronize",
     197: "cudaStreamAddCallback",
     198: "cudaStreamCreateWithFlags",
     200: "cudaDeviceGetAttribute",
@@ -77,11 +81,30 @@ class Memcpy(namedtuple('Memcpy', ['copy_kind', 'src_kind', 'dst_kind', 'bytes',
         return Memcpy(*row[1:4], *row[5:9])
 
 
-class Marker(namedtuple('Marker', ['timestamp', 'name'])):
+class Marker(namedtuple('Marker', ['timestamp', 'id_', 'name'])):
     __slots__ = ()
 
     def from_nvprof_row(row, strings):
-        return Marker(row[2], strings[row[6]])
+        return Marker(*row[2:4], strings[row[6]])
+
+# could be produced with a query like
+# SELECT start, end, name, domain from (
+# SELECT
+# count(*) as num_markers,
+# Max(timestamp) as start,
+#  Min(timestamp) as end,
+#  Max(name) as name,
+#  domain
+# FROM CUPTI_ACTIVITY_KIND_MARKER group by id
+# ) where num_markers == 2
+
+
+class Range(namedtuple('Range', ['start', 'end', 'name', 'domain'])):
+    """Represents a paired set of markers from nvprof"""
+    __slots__ = ()
+
+    def from_nvprof_row(row, strings):
+        return Range(*row[0:2], strings[row[2]], strings[row[3]])
 
 
 """

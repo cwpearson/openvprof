@@ -143,6 +143,8 @@ def summary_new(ctx, filename, begin, end):
     exposed_comm = any_comm & (~ (any_gpu_kernel | any_runtime))
     exposed_runtime_mask = ~ (any_gpu_kernel | any_comm)
     exposed_runtime = any_runtime & exposed_runtime_mask
+    exposed_runtime.record_key = lambda r: (r.pid, r.tid, r.name())
+    any_runtime.record_key = lambda r: (r.pid, r.tid, r.name())
 
     any_runtime.verbose = True
     any_runtime.name = "any_runtime"
@@ -154,7 +156,6 @@ def summary_new(ctx, filename, begin, end):
     exposed_runtime.name = "exposed_runtime"
     exposed_runtime_mask.verbose = True
     exposed_runtime_mask.name = "exposed_runtime_mask"
-    exposed_runtime.record_key = lambda r: (r.pid, r.tid, r.name())
 
     rows_read = 0
     loop_wall_start = time.time()
@@ -195,6 +196,7 @@ def summary_new(ctx, filename, begin, end):
             else:
                 comms[comm_id].set_idle(timestamp)
 
+        # Track records by various activity masks
         if is_posedge:
             if isinstance(record, nvprof.record.Runtime):
                 any_runtime.start_record_if_active(timestamp, record)
@@ -202,6 +204,8 @@ def summary_new(ctx, filename, begin, end):
             elif isinstance(record, nvprof.record.Comm):
                 exposed_communication.start_record_if_active(
                     timestamp, record)
+            elif isinstance(record, nvprof.record.Marker):
+                pass
         else:
             if isinstance(record, nvprof.record.Runtime):
                 any_runtime.end_record(timestamp, record)
@@ -212,14 +216,18 @@ def summary_new(ctx, filename, begin, end):
     # print("Records cover: {}s".format(
     #     (last_record_end - first_record_start) / 1e9))
 
+    print("Marker Report")
+    print("=============")
+
     print("Communication Report")
     print("====================")
-    print("Any communication active: {}s".format(any_comm.time/1e9))
-    print("Any communication breakdown")
-    print("---------------------------")
+    print("Active communication time-slices: {}s".format(any_comm.time/1e9))
+    print("Exposed communication time-slices: {}s".format(exposed_comm.time/1e9))
+    print("Active Communication Time-Slices")
+    print("--------------------------------")
     for tag, t in comms.items():
-        print("  {} Communication Time: {}s".format(tag, t.time/1e9))
-    print("Total Exposed Communication Time: {}s".format(exposed_comm.time/1e9))
+        print("  {} {}s".format(tag, t.time/1e9))
+
     print("Exposed communication breakdown")
     print("-------------------------------")
 
@@ -229,11 +237,22 @@ def summary_new(ctx, filename, begin, end):
 
     print("Exposed Runtime by Thread:")
     print("--------------------------")
-    print("(how much of the exposed time each thread is active for)")
+    thread_times = defaultdict(lambda: 0.0)
+    for record, elapsed in exposed_runtime.record_times.items():
+        thread_times[record[1]] += elapsed
+    thread_times = sorted(thread_times.items(),
+                          key=lambda t: t[1], reverse=True)
+    for name, elapsed in thread_times:
+        print("  {} {}s".format(name, elapsed/1e9))
 
     print("Exposed Runtime by Call:")
     print("------------------------")
-    print("(how much of the exposed time each API is active for)")
+    call_times = defaultdict(lambda: 0.0)
+    for record, elapsed in exposed_runtime.record_times.items():
+        call_times[record[2]] += elapsed
+    call_times = sorted(call_times.items(), key=lambda t: t[1], reverse=True)
+    for name, elapsed in call_times:
+        print("  {} {}s".format(name, elapsed/1e9))
 
     print("Exposed Runtime by Record:")
     print("--------------------------")

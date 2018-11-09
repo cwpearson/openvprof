@@ -138,8 +138,6 @@ class Timeline(Expr):
         self.time += (ts - self.activated_at)
         self.activated_at = None
         for p in self.parents:
-            # print("base timeline busy->idle at",
-            #       ts, "informing parent", id(p))
             p.child_changed(ts)
 
     def set_active(self, ts):
@@ -147,8 +145,6 @@ class Timeline(Expr):
         self.activated_at = ts
 
         for p in self.parents:
-            # print("base timeline idle->busy at",
-            #       ts, "informing parent", id(p))
             p.child_changed(ts)
 
     def evaluate(self):
