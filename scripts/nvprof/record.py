@@ -26,6 +26,8 @@ RUNTIME_CBID_NAME = {
     135: "cudaEventRecord",
     136: "cudaEventDestroy",
     147: "cudaStreamWaitEvent",
+    152: "cudaHostRegister",
+    153: "cudaHostUnregister",
     197: "cudaStreamAddCallback",
     198: "cudaStreamCreateWithFlags",
     200: "cudaDeviceGetAttribute",
@@ -41,8 +43,9 @@ class Runtime(namedtuple('Runtime', ['cbid', 'start', 'end', 'pid', 'tid', 'corr
 
     def from_nvprof_row(row):
         tid = row[5]
-        if tid < 2**32:
+        if tid < 0:
             tid += 2**32
+            assert tid >= 0
         return Runtime(*row[1:5], tid, *row[6:])
 
     def name(self):

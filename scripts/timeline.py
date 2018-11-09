@@ -37,6 +37,8 @@ class Expr(object):
         self.verbose = False
         self.name = str(id(self))
 
+        self.record_key = lambda r: r
+
         # update myself immediately so my initial value is correct
         self.child_changed(0)
 
@@ -51,15 +53,22 @@ class Expr(object):
 
     def start_record_if_active(self, ts, record):
         if self.evaluate():
-            if record in self.record_starts:
+            key = self.record_key(record)
+            if key in self.record_starts:
                 print(record, "already marked as started")
-            assert record not in self.record_starts
-            self.record_starts[record] = ts
+            assert key not in self.record_starts
+            self.record_starts[key] = ts
 
     def end_record(self, ts, record):
-        if record in self.record_starts:  # may have already ended this record if it was the cause of the Expr going inactive
-            self.record_times[record] += ts - self.record_starts[record]
-            del self.record_starts[record]
+        key = self.record_key(record)
+        if key in self.record_starts:  # may have already ended this record if it was the cause of the Expr going inactive
+            self.record_times[key] += ts - self.record_starts[key]
+            del self.record_starts[key]
+
+    def end_all_records(self, ts):
+        for key in list(self.record_starts.keys()):
+            self.record_times[key] += ts - self.record_starts[key]
+            del self.record_starts[key]
 
     def evaluate(self):
         """we should have already been updated by our children if they changed"""
@@ -88,8 +97,7 @@ class Expr(object):
             # self.print("busy -> idle")
             self.time += ts - self.activated_at
             self.activated_at = None
-            for record in list(self.record_starts.keys()):
-                self.end_record(ts, record)
+            self.end_all_records(ts)
             changed = True
 
         # inform parents if I have changed

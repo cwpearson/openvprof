@@ -157,19 +157,33 @@ class Db(object):
                 else:
                     logger.warning("unhandled table {}".format(table))
 
-    def edges(self, table):
+    def edges(self, table, start_ts=None, end_ts=None):
+
+        sql_start_end_where = ""
+        if start_ts:
+            sql_start_end_where += " where end >= {}".format(start_ts)
+        if start_ts and end_ts:
+            sql_start_end_where += " and"
+        if end_ts:
+            sql_start_end_where += " where start <= {}", format(end_ts)
+
+        timestamp_where = ""
+        if start_ts:
+            timestamp_where += " and where timestamp >= {}".format(start_ts)
+        if end_ts:
+            timestamp_where += " and where timestamp <= {}", format(end_ts)
 
         def _start_end_posedge(table):
-            return "select start as ts, 1 as edge, * from {}".format(table)
+            return "select start as ts, 1 as edge, * from {}{}".format(table, sql_start_end_where)
 
         def _start_end_negedge(table):
-            return "select end as ts, 0 as edge, * from {}".format(table)
+            return "select end as ts, 0 as edge, * from {}{}".format(table, sql_start_end_where)
 
         def _marker_posedge(table):
-            return "SELECT timestamp as ts, 1 as edge, * FROM {} where flags == 2".format(table)
+            return "SELECT timestamp as ts, 1 as edge, * FROM {} where flags == 2{}".format(table, timestamp_where)
 
         def _marker_negedge(table):
-            return "SELECT timestamp as ts, 0 as edge, * FROM {} where flags == 4".format(table)
+            return "SELECT timestamp as ts, 0 as edge, * FROM {} where flags == 4{}".format(table, timestamp_where)
 
         if table == 'CUPTI_ACTIVITY_KIND_MARKER':
             posedge_func = _marker_posedge
@@ -184,11 +198,11 @@ class Db(object):
         sql += "\n) order by ts"
         return self.execute(sql)
 
-    def multi_edges(self, table_names):
+    def multi_edges(self, table_names, start_ts=None, end_ts=None):
         edges = {}
         next_edges = {}
         for table in table_names:
-            edges[table] = self.edges(table)
+            edges[table] = self.edges(table, start_ts=start_ts, end_ts=end_ts)
             next_edges[table] = edges[table].fetchone()
 
         while True:
@@ -218,19 +232,19 @@ class Db(object):
             next_edges[yield_table] = edges[yield_table].fetchone()
             yield yield_table, yield_edge
 
-    def multi_edges_records(self, table_names):
+    def multi_edges_records(self, table_names, start_ts=None, end_ts=None):
 
         strings, _ = self.get_strings()
 
-        for table, edge in self.multi_edges(table_names):
+        for table, edge in self.multi_edges(table_names, start_ts=start_ts, end_ts=end_ts):
             if table == "CUPTI_ACTIVITY_KIND_RUNTIME":
-                yield edge[1], Runtime.from_nvprof_row(edge[2:])
+                yield edge[0], edge[1], Runtime.from_nvprof_row(edge[2:])
             elif table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL":
-                yield edge[1], ConcurrentKernel.from_nvprof_row(edge[2:], strings)
+                yield edge[0], edge[1], ConcurrentKernel.from_nvprof_row(edge[2:], strings)
             elif table == "CUPTI_ACTIVITY_KIND_MEMCPY":
-                yield edge[1], Memcpy.from_nvprof_row(edge[2:])
+                yield edge[0], edge[1], Memcpy.from_nvprof_row(edge[2:])
             elif table == "CUPTI_ACTIVITY_KIND_MARKER":
-                yield edge[1], Marker.from_nvprof_row(edge[2:], strings)
+                yield edge[0], edge[1], Marker.from_nvprof_row(edge[2:], strings)
 
 
 class MultiTableRows(object):

@@ -38,26 +38,6 @@ class Heap(object):
         return len(self.items)
 
 
-class CombinedTimeline(object):
-    def __init__(self, update_function):
-        """ update function is expected to return whether the combined timeline should be active"""
-        self.update_function = update_function
-        self.time = 0.0
-        self.actived_at = None
-        self.prev_active = False
-
-    def is_active(self):
-        return self.prev_active
-
-    def update(self, ts):
-        active = self.update_function()
-        if self.prev_active and not active:  # active -> idle
-            self.time += (ts - self.activated_at)
-        elif not self.prev_active and active:  # idle -> active
-            self.activated_at = ts
-        self.prev_active = active
-
-
 @click.command()
 @click.argument('filename')
 @click.option('-b', '--begin', help='Only consider events that begin after this time')
@@ -108,6 +88,7 @@ def summary_new(ctx, filename, begin, end):
     tids = set()
     for row in db.execute("SELECT distinct threadId from CUPTI_ACTIVITY_KIND_RUNTIME"):
         tid = row[0]
+        print(tid)
         if tid < 0:
             tid += 2**32
             assert tid >= 0
@@ -121,7 +102,6 @@ def summary_new(ctx, filename, begin, end):
     tables = [
         'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL',
         'CUPTI_ACTIVITY_KIND_MEMCPY',
-        # 'CUPTI_ACTIVITY_KIND_MEMCPY2',
         'CUPTI_ACTIVITY_KIND_KERNEL',
         'CUPTI_ACTIVITY_KIND_RUNTIME',
     ]
@@ -174,132 +154,63 @@ def summary_new(ctx, filename, begin, end):
     exposed_runtime.name = "exposed_runtime"
     exposed_runtime_mask.verbose = True
     exposed_runtime_mask.name = "exposed_runtime_mask"
-    queue = []
+    exposed_runtime.record_key = lambda r: (r.pid, r.tid, r.name())
 
-    def consume(ts, table, row, op):
+    rows_read = 0
+    loop_wall_start = time.time()
+    for timestamp, is_posedge, record in db.multi_edges_records(tables, start_ts=begin, end_ts=end):
 
-        assert ts
-        assert table
-        assert row
-        assert op
-        start = None
-        end = None
-        ts = normalize_to_nvprof(ts)
+        rows_read += 1
+        if rows_read % 15000 == 0:
+            elapsed = time.time() - loop_wall_start
+            logger.debug("{} rows/sec".format(rows_read / elapsed))
 
-        record = None
+        assert timestamp
+        assert record
+        timestamp = normalize_to_nvprof(timestamp)
 
-        if table == "CUPTI_ACTIVITY_KIND_RUNTIME":
-            # print("consuming runtime", op)
-            record = nvprof.record.Runtime.from_nvprof_row(row)
-            if op == START:
-                runtimes[tid].set_active(ts)
+        # Update active masks
+        if isinstance(record, nvprof.record.Runtime):
+            if is_posedge:
+                runtimes[record.tid].set_active(timestamp)
             else:
-                runtimes[tid].set_idle(ts)
-        elif table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL" or table == "CUPTI_ACTIVITY_KIND_KERNEL":
-            # print("consuming GPU kernel", op)
-            start = row[6]
-            end = row[7]
-            start = normalize_to_nvprof(start)
-            end = normalize_to_nvprof(end)
-            device_id = row[9]
-            record = None
-            # print(start, end, device_id, op)
-            if op == START:
-                gpu_kernels[device_id].set_active(start)
+                runtimes[record.tid].set_idle(timestamp)
+        elif isinstance(record, nvprof.record.ConcurrentKernel):
+            if is_posedge:
+                gpu_kernels[record.device_id].set_active(timestamp)
             else:
-                gpu_kernels[device_id].set_idle(end)
-            # assert False
-        elif table == "CUPTI_ACTIVITY_KIND_MEMCPY":
-            src_kind = row[2]
-            dst_kind = row[3]
-            start = row[6]
-            end = row[7]
-            start = normalize_to_nvprof(start)
-            end = normalize_to_nvprof(end)
-            device_id = row[8]
-            record = None
-            if src_kind == cupti.activity_memory_kind.DEVICE:
-                src_tag = 'gpu' + str(device_id)
+                gpu_kernels[record.device_id].set_idle(timestamp)
+        elif isinstance(record, nvprof.record.Memcpy):
+            if record.src_kind == cupti.activity_memory_kind.DEVICE:
+                src_tag = 'gpu' + str(record.device_id)
             else:
                 src_tag = 'cpu'
-            if dst_kind == cupti.activity_memory_kind.DEVICE:
-                dst_tag = 'gpu' + str(device_id)
+            if record.dst_kind == cupti.activity_memory_kind.DEVICE:
+                dst_tag = 'gpu' + str(record.device_id)
             else:
                 dst_tag = 'cpu'
             comm_id = src_tag + "-" + dst_tag
-            if op == START:
-                comms[comm_id].set_active(start)
+            if is_posedge:
+                comms[comm_id].set_active(timestamp)
             else:
-                comms[comm_id].set_idle(end)
-        # elif table == "CUPTI_ACTIVITY_KIND_MEMCPY2":
-        #     start = row[6]
-        #     end = row[7]
+                comms[comm_id].set_idle(timestamp)
 
-        if op == START:
+        if is_posedge:
             if isinstance(record, nvprof.record.Runtime):
-                any_runtime.start_record_if_active(ts, record)
-                exposed_runtime.start_record_if_active(ts, record)
+                any_runtime.start_record_if_active(timestamp, record)
+                exposed_runtime.start_record_if_active(timestamp, record)
             elif isinstance(record, nvprof.record.Comm):
-                exposed_communication.start_record_if_active(ts, record)
-        if op == STOP:
+                exposed_communication.start_record_if_active(
+                    timestamp, record)
+        else:
             if isinstance(record, nvprof.record.Runtime):
-                any_runtime.end_record(ts, record)
-                exposed_runtime.end_record(ts, record)
+                any_runtime.end_record(timestamp, record)
+                exposed_runtime.end_record(timestamp, record)
             elif isinstance(record, nvprof.record.Comm):
-                exposed_communication.end_record(ts, record)
+                exposed_communication.end_record(timestamp, record)
 
-    heap = Heap()
-
-    loop_wall_start = None
-    rows_read = 0
-    next_pct = 1
-    progress_start = None
-    last_record_end = 0
-    first_record_start = None
-    for new_table, new_row, new_start, new_stop in db.multi_rows(tables, start_ts=begin, end_ts=end):
-        # print("read", new_table, "at",
-        #       normalize_to_nvprof(new_start) / 1e9,
-        #       normalize_to_nvprof(new_stop) / 1e9)
-        # if new_stop:
-        #     assert new_stop <= end
-        if not loop_wall_start:
-            loop_wall_start = time.time()
-        if not progress_start:
-            progress_start = new_start
-        if not first_record_start:
-            first_record_start = new_start
-        first_record_start = min(first_record_start, new_start)
-        last_record_end = max(last_record_end, new_stop)
-
-        rows_read += 1
-        cur_pct = int(rows_read / total_rows * 100)
-        if cur_pct >= next_pct:
-            avg_rows_per_sec = rows_read / (time.time() - loop_wall_start)
-            eta = (total_rows - rows_read) / avg_rows_per_sec
-            sys.stderr.write(
-                "{}% ({}/{} rows) ({}ns-{}ns) ({} rows/s) (eta {}s)\n".format(int(cur_pct), rows_read,
-                                                                              total_rows, progress_start, new_stop, int(avg_rows_per_sec), int(eta)))
-            next_pct = cur_pct + 1
-            sys.stderr.flush()
-            progress_start = new_start
-
-        # consume priority queue operations until we reach the start of the next operation
-        # print("consuming until", new_start)
-        while len(heap) and heap.peek()[0] <= new_start:
-            ts, (table, row, op) = heap.pop()
-            consume(ts, table, row, op)
-
-        # push start and stop markers onto heap
-        heap.push((new_table, new_row, START), new_start)
-        heap.push((new_table, new_row, STOP), new_stop)
-
-    # finish up the heap
-    while len(heap):
-        ts, (table, row, op) = heap.pop()
-        consume(ts, table, row, op)
-
-    print("Records cover: {}s".format(
-        (last_record_end - first_record_start) / 1e9))
+    # print("Records cover: {}s".format(
+    #     (last_record_end - first_record_start) / 1e9))
 
     print("Communication Report")
     print("====================")
