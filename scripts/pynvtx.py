@@ -183,7 +183,7 @@ class Tracer(object):
     
             # skip any imports
             if "importlib" in frame.f_code.co_filename:
-                print("saw importlib..wait for return...")
+                logger.debug("saw importlib..wait for return...")
                 mode[0] = frame
                 return self.tracefunc
     
@@ -210,7 +210,6 @@ class Tracer(object):
                 name = function_full_name(arg, module=module)
             # filename, lineno, function_name, code_context, index = inspect.getframeinfo(frame)
             range_name = ".".join(name)
-            # print(len(ranges[0]) * " " + "PUSH", ".".join(name))
             ranges[0].append(frame)
             self._nvtxRangePush(range_name)
         # elif event == "c_return":
@@ -228,7 +227,6 @@ class Tracer(object):
                     self._nvtxRangePop()
                     ranges[0] = ranges[0][:-1]
                     # name = full_name(frame)
-                    # print(len(ranges[0]) * " " + "POP", ".".join(name))
     
         return self.tracefunc
 
