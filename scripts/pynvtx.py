@@ -148,12 +148,12 @@ class Tracer(object):
 
     def _nvtxRangePush(self, s): 
         if self.libnvtoolsext:
-            logger.debug("pushing s {}".format(s))
+            logger.debug("pushing {}".format(s))
             self.libnvtoolsext.nvtxRangePushA(ctypes.c_char_p(str.encode(s)))
     def _nvtxRangePop(self):
         if self.libnvtoolsext:
             logger.debug("popping")
-            self.libnvtoolsext.nvtxRangePop
+            self.libnvtoolsext.nvtxRangePop()
 
     def tracefunc(self, frame, event, arg, ranges=[[]], mode=[None]):
     
