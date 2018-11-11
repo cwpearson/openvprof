@@ -6,3 +6,10 @@
 *.fatbin
 build
 .vscode
+
+.DS_Store
+data/
+scripts/__pycache__/
+scripts/cmd/__pycache__/
+scripts/cupti/__pycache__/
+scripts/nvprof/__pycache__/
