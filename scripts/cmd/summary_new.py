@@ -67,6 +67,8 @@ def summary_new(ctx, filename, begin, end, range):
         logger.debug("using first timestamp in file as begin")
         begin = nvprof_start_timestamp
 
+    opt_spans = [(begin, end)]
+
     def normalize_to_nvprof(ts):
         """ normalize all timestamps to the beginning of our analysis"""
         adjusted = ts - nvprof_start_timestamp
@@ -117,7 +119,8 @@ def summary_new(ctx, filename, begin, end, range):
     filtered_edges = {}
     total_edges = 0
     for table in tables:
-        filtered = db.create_filtered_table(table, range_names=range)
+        filtered = db.create_filtered_table(
+            table, range_names=range, spans=opt_spans)
 
         num_rows = db.execute(
             'SELECT Count(*) from {}'.format(filtered)).fetchone()[0]

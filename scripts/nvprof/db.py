@@ -189,6 +189,7 @@ WITH rows AS (
                     raise SystemExit(-1)
 
     def table_exists(self, table):
+        """return True if table exists, else False"""
         sql = "SELECT name FROM sqlite_master WHERE type='table' AND name='{table}';".format(
             table=table)
         row = self.execute(sql).fetchone()[0]
@@ -265,16 +266,50 @@ order by ts""".format(new_view, rows_view)
         self.execute(sql)
         return new_view
 
-    def create_filtered_table(self, table, range_names=None):
+    def rows_overlap_spans(self, table, spans):
+        """ create a view where rows are only present if they overlap some spans"""
+        out_view = self.get_unique_name()
+        sql = """CREATE TEMP VIEW {0} AS
+SELECT * FROM {1} WHERE""".format(out_view, table)
+
+        for i, span in enumerate(spans):
+            assert len(span) == 2
+            span_sql = "\n  "
+            if i > 0:
+                span_sql += "AND "
+            span_sql += "("
+            if bool(span[0]) != bool(span[1]):
+                if span[0]:
+                    span_sql += "{0}.end >= {1}".format(table, span[0])
+                if span[1]:
+                    span_sql += "{0}.start <= {1}".format(table, span[1])
+
+            elif span[0] and span[1]:
+                span_sql += "{0}.start between {1} and {2}".format(
+                    table, *span)
+                span_sql += " OR {0}.start between {1} and {2}".format(
+                    table, *span)
+                span_sql += " OR {0} between {1}.start and {1}.end".format(
+                    span[0], table)
+
+            span_sql += ")"
+            sql += span_sql
+        self.execute(sql)
+        return out_view
+
+    def create_filtered_table(self, table, range_names=None, spans=None):
+        filtered_view = table
         if range_names:
             # create a view which has ranges with a name like range_names
             ranges_view = self.ranges_with_name(range_names)
 
             # create a view that has rows that fall in ranges in a view
-            rows_view = self.rows_overlap_ranges(table, ranges_view)
-            return rows_view
-        else:
-            return table
+            filtered_view = self.rows_overlap_ranges(table, ranges_view)
+
+        if spans:
+            filtered_view = self.rows_overlap_spans(filtered_view, spans)
+
+        return filtered_view
 
     def create_edges_view(self, view):
         out_view = self.get_unique_name()
@@ -285,67 +320,6 @@ select {1}.end as ts, 0 as edge, * from {1}""".format(out_view, view)
         self.execute(sql)
         return out_view
 
-#     def _rows_in_range_name(self, table, range_names):
-#         """sql to select all columns from 'table' where 'table'.start and table.'end' fall
-#         within a range that has a name like range_names.
-#         If a row is in multiple ranges, only one is returned
-#         """
-
-#         matching_ranges_query = self._ranges_by_name_query(range_names)
-
-#         # DISTINCT because if a row is in multiple ranges we only want to see it once
-#         sql = """SELECT DISTINCT
-#   {0}.*
-# from
-#   {0}
-# JOIN
-# (
-# {1}
-# ) as CUPTI_ACTIVITY_KIND_RANGE
-# where
-#   {0}.start BETWEEN CUPTI_ACTIVITY_KIND_RANGE.start and CUPTI_ACTIVITY_KIND_RANGE.end
-#   and {0}.end BETWEEN CUPTI_ACTIVITY_KIND_RANGE.start and CUPTI_ACTIVITY_KIND_RANGE.end""".format(table, matching_ranges_query)
-#         return sql
-
-#     def _rows_to_edges(self, table, range_names=None):
-
-#         if range_names:
-#             row_sql = self._rows_in_range_name(table, range_names)
-#         else:
-#             row_sql = "SELECT * in {0}".format(table)
-
-#         convert_to_edges_sql = """select {0}.start as ts, 1 as edge, * from ({1}) as {0}
-# UNION ALL
-# select {0}.end as ts, 0 as edge, * from ({1}) as {0}
-# order by ts""".format(table, row_sql)
-
-#         return convert_to_edges_sql
-
-    # def _edges_sql(self, table, start_ts=None, end_ts=None):
-    #     sql_start_end_where = ""
-    #     if start_ts:
-    #         sql_start_end_where += " where end >= {}".format(start_ts)
-    #     if start_ts and end_ts:
-    #         sql_start_end_where += " and"
-    #     if end_ts:
-    #         sql_start_end_where += " where start <= {}", format(end_ts)
-
-    #     def _start_end_posedge(table):
-    #         return "select start as ts, 1 as edge, * from {}{}".format(table, sql_start_end_where)
-
-    #     def _start_end_negedge(table):
-    #         return "select end as ts, 0 as edge, * from {}{}".format(table, sql_start_end_where)
-
-    #     posedge_func = _start_end_posedge
-    #     negedge_func = _start_end_negedge
-    #     subquery = "("
-    #     subquery += "\n" + posedge_func(table)
-    #     subquery += "\n" + "UNION ALL"
-    #     subquery += "\n" + negedge_func(table)
-    #     subquery += "\n)"
-    #     sql = Select(table_or_subquery=subquery, ordering_terms=["ts"])
-    #     return sql
-
     def edges(self, table, start_ts=None, end_ts=None):
         sql = self._edges_sql(table, start_ts, end_ts)
         return self.execute(sql)
@@ -354,19 +328,6 @@ select {1}.end as ts, 0 as edge, * from {1}""".format(out_view, view)
         sql = self._edges_sql(table, start_ts, end_ts)
         sql.result_columns = ["Count(*)"]
         return self.execute(sql).fetchone()[0]
-
-#     def _ranges_by_name_query(self, range_names):
-#         """return sql select statement that produces results with (name, start, end) for any range with range_names in the name"""
-#         assert len(range_names) > 0
-#         sql = """select
-#   CUPTI_ACTIVITY_KIND_RANGE.*
-# from
-#   CUPTI_ACTIVITY_KIND_RANGE
-#   INNER JOIN StringTable on CUPTI_ACTIVITY_KIND_RANGE.name = StringTable._id_
-#   where StringTable.value like '%{}%'""".format(range_names[0])
-#         for name in range_names[1:]:
-#             sql += "\n  or StringTable.value like '%{}%'".format(name)
-#         return sql
 
     def multi_edges(self, table_names, start_ts=None, end_ts=None):
         edges = {}
