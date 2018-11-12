@@ -197,37 +197,67 @@ WITH rows AS (
             return True
         return False
 
-    def ranges_with_name(self, range_names):
+    def ranges_with_name(self, range_names, first_n=None):
         assert len(range_names) > 0
         view_name = self.get_unique_name()
-        sql = """CREATE TEMP TABLE {} as
-select
-  CUPTI_ACTIVITY_KIND_RANGE.*
-from
-  CUPTI_ACTIVITY_KIND_RANGE
-  INNER JOIN StringTable on CUPTI_ACTIVITY_KIND_RANGE.name = StringTable._id_
-  where StringTable.value like '%{}%'""".format(view_name, range_names[0])
+        sql = """CREATE TEMP TABLE {} AS
+SELECT CUPTI_ACTIVITY_KIND_RANGE.*
+FROM
+CUPTI_ACTIVITY_KIND_RANGE
+INNER JOIN StringTable on CUPTI_ACTIVITY_KIND_RANGE.name = StringTable._id_
+WHERE StringTable.value like '%{}%'""".format(view_name, range_names[0])
         for name in range_names[1:]:
             sql += "\n  or StringTable.value like '%{}%'".format(name)
+        sql += "\nORDER BY CUPTI_ACTIVITY_KIND_RANGE.start"
+        if first_n:
+            sql += "\nLIMIT {}".format(first_n)
         self.execute(sql)
         return view_name
+
+#     def rows_in_ranges(self, table, ranges_view):
+#         """ create a view that has rows from table that are in RANGES_VIEW"""
+#         new_view = self.get_unique_name()
+#         sql = """CREATE TEMP VIEW {2} AS
+# SELECT DISTINCT
+#   {0}.*
+# FROM
+#   {0}
+# JOIN
+#   {1}
+# where
+#   {0}.start BETWEEN {1}.start and {1}.end
+#   and {0}.end BETWEEN {1}.start and {1}.end""".format(table, ranges_view, new_view)
+#         self.execute(sql)
+#         return new_view
 
     def rows_in_ranges(self, table, ranges_view):
         """ create a view that has rows from table that are in RANGES_VIEW"""
         new_view = self.get_unique_name()
         sql = """CREATE TEMP VIEW {2} AS
-SELECT DISTINCT
-  {0}.*
-FROM
-  {0}
-JOIN
-  {1}
-where
-  {0}.start BETWEEN {1}.start and {1}.end
-  and {0}.end BETWEEN {1}.start and {1}.end""".format(table, ranges_view, new_view)
-
+SELECT * FROM {0}
+WHERE EXISTS
+(
+  SELECT * from {1} WHERE
+    {0}.start BETWEEN {1}.start and {1}.end
+    and {0}.end BETWEEN {1}.start and {1}.end
+)""".format(table, ranges_view, new_view)
         self.execute(sql)
         return new_view
+
+#     def rows_overlap_ranges(self, table, ranges_view):
+#         """ create a view that has rows from table that overlap ranges in RANGES_VIEW"""
+#         new_view = self.get_unique_name()
+#         sql = """CREATE TEMP VIEW {2} AS
+# SELECT * FROM {0}
+# WHERE EXISTS
+# (
+#   SELECT * FROM {1} WHERE
+#     {0}.start BETWEEN {1}.start and {1}.end
+#     or {0}.end BETWEEN {1}.start and {1}.end
+#     or {1}.end BETWEEN {0}.start and {0}.end
+# )""".format(table, ranges_view, new_view)
+#         self.execute(sql)
+#         return new_view
 
     def rows_overlap_ranges(self, table, ranges_view):
         """ create a view that has rows from table that overlap ranges in RANGES_VIEW"""
@@ -243,7 +273,6 @@ where
   {0}.start BETWEEN {1}.start and {1}.end
   or {0}.end BETWEEN {1}.start and {1}.end
   or {1}.end BETWEEN {0}.start and {0}.end""".format(table, ranges_view, new_view)
-
         self.execute(sql)
         return new_view
 
@@ -297,11 +326,12 @@ SELECT * FROM {1} WHERE""".format(out_view, table)
         self.execute(sql)
         return out_view
 
-    def create_filtered_table(self, table, range_names=None, spans=None):
+    def create_filtered_table(self, table, range_names=None, first_n_ranges=None, spans=None):
         filtered_view = table
         if range_names:
             # create a view which has ranges with a name like range_names
-            ranges_view = self.ranges_with_name(range_names)
+            ranges_view = self.ranges_with_name(
+                range_names, first_n=first_n_ranges)
 
             # create a view that has rows that fall in ranges in a view
             filtered_view = self.rows_overlap_ranges(table, ranges_view)

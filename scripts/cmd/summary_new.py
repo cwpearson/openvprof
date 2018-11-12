@@ -43,8 +43,9 @@ class Heap(object):
 @click.option('-b', '--begin', help='Only consider events that begin after this time')
 @click.option('-e', '--end', help='Only consider records that end before this time')
 @click.option('-r', '--range', multiple=True, help='Only consider records that occur during marker ranges with this in the name')
+@click.option('-n', '--first-ranges', help='Only consider the first n ranges, ordered by start time', type=int)
 @click.pass_context
-def summary_new(ctx, filename, begin, end, range):
+def summary_new(ctx, filename, begin, end, range, first_ranges):
 
     db = Db(filename)
 
@@ -63,11 +64,11 @@ def summary_new(ctx, filename, begin, end, range):
             begin = nvprof_start_timestamp + float(begin[:-1]) * 1_000_000_000
         begin = int(begin)
         logger.debug("converted --begin to ts {}".format(begin))
-    else:
-        logger.debug("using first timestamp in file as begin")
-        begin = nvprof_start_timestamp
 
-    opt_spans = [(begin, end)]
+    if begin or end:
+        opt_spans = [(begin, end)]
+    else:
+        opt_spans = []
 
     def normalize_to_nvprof(ts):
         """ normalize all timestamps to the beginning of our analysis"""
@@ -120,7 +121,7 @@ def summary_new(ctx, filename, begin, end, range):
     total_edges = 0
     for table in tables:
         filtered = db.create_filtered_table(
-            table, range_names=range, spans=opt_spans)
+            table, range_names=range, first_n_ranges=first_ranges, spans=opt_spans)
 
         num_rows = db.execute(
             'SELECT Count(*) from {}'.format(filtered)).fetchone()[0]

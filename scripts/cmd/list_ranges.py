@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 @click.command()
 @click.argument('filename')
-@click.option('--group', is_flag=True, help="group ranges by name")
+@click.option('--group/--no-group', default=True, help="group ranges by name")
 @click.option('--sort', type=click.Choice(['count', 'min', 'max', 'avg', 'tot']), default="tot")
 @click.pass_context
 def list_ranges(ctx, filename, group, sort):
