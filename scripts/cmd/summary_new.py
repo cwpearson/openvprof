@@ -101,9 +101,9 @@ def summary_new(ctx, filename, begin, end, range):
 
     logger.debug('determining time-spans during marker ranges')
     if range:
-        select = db._ranges_by_name_query(range)
+        ranges_view = db.ranges_with_name(range)
         num_ranges = db.execute(
-            'SELECT Count(*) from (\n{}\n)'.format(select)).fetchone()[0]
+            'SELECT Count(*) from {}'.format(ranges_view)).fetchone()[0]
         logger.debug("{} ranges match the names {}".format(num_ranges, range))
 
     tables = [
@@ -113,23 +113,32 @@ def summary_new(ctx, filename, begin, end, range):
         'CUPTI_ACTIVITY_KIND_RUNTIME',
     ]
 
-    if range:
-        for table in tables:
-            sql = db._rows_by_range_name(table, range)
-            num_rows = db.execute(
-                'SELECT Count(*) from (\n{}\n)'.format(sql)).fetchone()[0]
-            logger.debug("{} rows in {} fall within ranges {}".format(
-                num_rows, table, range))
-
-    total_rows = 0
+    # make filtered versions of all the tables
+    filtered_edges = {}
+    total_edges = 0
     for table in tables:
-        table_rows = db.num_edges(table, begin, end)
-        logger.debug("table {} has {} edges".format(table, table_rows))
-        total_rows += table_rows
-    logger.debug("{} edges".format(total_rows))
+        filtered = db.create_filtered_table(table, range_names=range)
 
-    START = 'op_start'
-    STOP = 'op_stop'
+        num_rows = db.execute(
+            'SELECT Count(*) from {}'.format(filtered)).fetchone()[0]
+        logger.debug("{} rows in {} overlap ranges {}".format(
+            num_rows, table, range))
+
+        edges_view = db.create_edges_view(filtered)
+        logger.debug("{} filtered is {}, edges in {}".format(
+            table, filtered, edges_view))
+        # sql = db._rows_in_range_name(table, range)
+        num_rows = db.execute(
+            'SELECT Count(*) from {}'.format(edges_view)).fetchone()[0]
+        logger.debug("{} edges in {} overlap ranges {}".format(
+            num_rows, table, range))
+        total_edges += num_rows
+        filtered_edges[table] = edges_view
+
+    for table, edges in filtered_edges.items():
+        logger.debug('{} -> {}'.format(table, edges))
+
+    logger.debug("{} edges".format(total_edges))
 
     gpu_kernels = {}
     runtimes = {}
@@ -178,7 +187,18 @@ def summary_new(ctx, filename, begin, end, range):
 
     rows_read = 0
     loop_wall_start = time.time()
-    for timestamp, is_posedge, record in db.multi_edges_records(tables, start_ts=begin, end_ts=end):
+    # for a particular table, how to create a row
+    row_factories = {}
+    for table, edges in filtered_edges.items():
+        if table == 'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL':
+            row_factories[edges] = nvprof.record.ConcurrentKernel.from_nvprof_row
+        elif table == 'CUPTI_ACTIVITY_KIND_MEMCPY':
+            row_factories[edges] = nvprof.record.Memcpy.from_nvprof_row
+        elif table == 'CUPTI_ACTIVITY_KIND_RUNTIME':
+            row_factories[edges] = nvprof.record.Runtime.from_nvprof_row
+        elif table == 'CUPTI_ACTIVITY_KIND_RANGE':
+            row_factories[edges] = nvprof.record.Range.from_nvprof_row
+    for timestamp, is_posedge, record in db.multi_ordered_edges_records(filtered_edges.values(), row_factories=row_factories):
 
         rows_read += 1
         if rows_read % 15000 == 0:

@@ -21,6 +21,7 @@ select Min(start) as start from CUPTI_ACTIVITY_KIND_RUNTIME
 
 class Db(object):
     def __init__(self, filename=None, read_only=True):
+        self.next_view_id = -1
         if read_only:
             # read-only
             uri_str = "file:"+filename+"?mode=ro"
@@ -37,13 +38,17 @@ class Db(object):
     def __del__(self):
         self._release_range_table()
 
+    def get_unique_name(self):
+        self.next_view_id += 1
+        return "view" + str(self.next_view_id)
+
     def _create_range_table(self):
         sql = """
 CREATE TEMPORARY TABLE CUPTI_ACTIVITY_KIND_RANGE AS
 WITH rows AS (
     SELECT start, end, name, domain from (
-    SELECT 
-    count(*) as num_markers, 
+    SELECT
+    count(*) as num_markers,
     Min(timestamp) as start,
     Max(timestamp) as end,
     Max(name) as name,
@@ -183,48 +188,163 @@ WITH rows AS (
                     logger.error("unhandled table {}".format(table))
                     raise SystemExit(-1)
 
-    def _rows_by_range_name(self, table, range_names):
-        """sql to select rows from table where row.start and row.end fall within a range that has a name like range_names"""
+    def table_exists(self, table):
+        sql = "SELECT name FROM sqlite_master WHERE type='table' AND name='{table}';".format(
+            table=table)
+        row = self.execute(sql).fetchone()[0]
+        if row:
+            return True
+        return False
 
-        matching_ranges_query = self._ranges_by_name_query(range_names)
-
-        sql = """select
-  {0}.*
+    def ranges_with_name(self, range_names):
+        assert len(range_names) > 0
+        view_name = self.get_unique_name()
+        sql = """CREATE TEMP TABLE {} as
+select
+  CUPTI_ACTIVITY_KIND_RANGE.*
 from
+  CUPTI_ACTIVITY_KIND_RANGE
+  INNER JOIN StringTable on CUPTI_ACTIVITY_KIND_RANGE.name = StringTable._id_
+  where StringTable.value like '%{}%'""".format(view_name, range_names[0])
+        for name in range_names[1:]:
+            sql += "\n  or StringTable.value like '%{}%'".format(name)
+        self.execute(sql)
+        return view_name
+
+    def rows_in_ranges(self, table, ranges_view):
+        """ create a view that has rows from table that are in RANGES_VIEW"""
+        new_view = self.get_unique_name()
+        sql = """CREATE TEMP VIEW {2} AS
+SELECT DISTINCT
+  {0}.*
+FROM
   {0}
 JOIN
-(
-{1}
-) as CUPTI_ACTIVITY_KIND_RANGE
+  {1}
 where
-  {0}.start BETWEEN CUPTI_ACTIVITY_KIND_RANGE.start and CUPTI_ACTIVITY_KIND_RANGE.end
-  and {0}.end BETWEEN CUPTI_ACTIVITY_KIND_RANGE.start and CUPTI_ACTIVITY_KIND_RANGE.end""".format(table, matching_ranges_query)
-        return sql
+  {0}.start BETWEEN {1}.start and {1}.end
+  and {0}.end BETWEEN {1}.start and {1}.end""".format(table, ranges_view, new_view)
 
-    def _edges_sql(self, table, start_ts=None, end_ts=None):
-        sql_start_end_where = ""
-        if start_ts:
-            sql_start_end_where += " where end >= {}".format(start_ts)
-        if start_ts and end_ts:
-            sql_start_end_where += " and"
-        if end_ts:
-            sql_start_end_where += " where start <= {}", format(end_ts)
+        self.execute(sql)
+        return new_view
 
-        def _start_end_posedge(table):
-            return "select start as ts, 1 as edge, * from {}{}".format(table, sql_start_end_where)
+    def rows_overlap_ranges(self, table, ranges_view):
+        """ create a view that has rows from table that overlap ranges in RANGES_VIEW"""
+        new_view = self.get_unique_name()
+        sql = """CREATE TEMP VIEW {2} AS
+SELECT DISTINCT
+  {0}.*
+FROM
+  {0}
+JOIN
+  {1}
+where
+  {0}.start BETWEEN {1}.start and {1}.end
+  or {0}.end BETWEEN {1}.start and {1}.end
+  or {1}.end BETWEEN {0}.start and {0}.end""".format(table, ranges_view, new_view)
 
-        def _start_end_negedge(table):
-            return "select end as ts, 0 as edge, * from {}{}".format(table, sql_start_end_where)
+        self.execute(sql)
+        return new_view
 
-        posedge_func = _start_end_posedge
-        negedge_func = _start_end_negedge
-        subquery = "("
-        subquery += "\n" + posedge_func(table)
-        subquery += "\n" + "UNION ALL"
-        subquery += "\n" + negedge_func(table)
-        subquery += "\n)"
-        sql = Select(table_or_subquery=subquery, ordering_terms=["ts"])
-        return sql
+    def edges_from_rows(self, rows_view):
+        new_view = self.get_unique_name()
+        sql = """CREATE TEMP VIEW {0} AS
+SELECT
+  {1}.start as ts,
+  1 as edge,
+  * 
+FROM {1}
+UNION ALL
+SELECT
+  {1}.end as ts,
+  0 as edge,
+  *
+FROM {1}
+order by ts""".format(new_view, rows_view)
+
+        self.execute(sql)
+        return new_view
+
+    def create_filtered_table(self, table, range_names=None):
+        if range_names:
+            # create a view which has ranges with a name like range_names
+            ranges_view = self.ranges_with_name(range_names)
+
+            # create a view that has rows that fall in ranges in a view
+            rows_view = self.rows_overlap_ranges(table, ranges_view)
+            return rows_view
+        else:
+            return table
+
+    def create_edges_view(self, view):
+        out_view = self.get_unique_name()
+        sql = """CREATE TEMP VIEW {0} AS
+SELECT {1}.start as ts, 1 as edge, * from {1}
+UNION ALL
+select {1}.end as ts, 0 as edge, * from {1}""".format(out_view, view)
+        self.execute(sql)
+        return out_view
+
+#     def _rows_in_range_name(self, table, range_names):
+#         """sql to select all columns from 'table' where 'table'.start and table.'end' fall
+#         within a range that has a name like range_names.
+#         If a row is in multiple ranges, only one is returned
+#         """
+
+#         matching_ranges_query = self._ranges_by_name_query(range_names)
+
+#         # DISTINCT because if a row is in multiple ranges we only want to see it once
+#         sql = """SELECT DISTINCT
+#   {0}.*
+# from
+#   {0}
+# JOIN
+# (
+# {1}
+# ) as CUPTI_ACTIVITY_KIND_RANGE
+# where
+#   {0}.start BETWEEN CUPTI_ACTIVITY_KIND_RANGE.start and CUPTI_ACTIVITY_KIND_RANGE.end
+#   and {0}.end BETWEEN CUPTI_ACTIVITY_KIND_RANGE.start and CUPTI_ACTIVITY_KIND_RANGE.end""".format(table, matching_ranges_query)
+#         return sql
+
+#     def _rows_to_edges(self, table, range_names=None):
+
+#         if range_names:
+#             row_sql = self._rows_in_range_name(table, range_names)
+#         else:
+#             row_sql = "SELECT * in {0}".format(table)
+
+#         convert_to_edges_sql = """select {0}.start as ts, 1 as edge, * from ({1}) as {0}
+# UNION ALL
+# select {0}.end as ts, 0 as edge, * from ({1}) as {0}
+# order by ts""".format(table, row_sql)
+
+#         return convert_to_edges_sql
+
+    # def _edges_sql(self, table, start_ts=None, end_ts=None):
+    #     sql_start_end_where = ""
+    #     if start_ts:
+    #         sql_start_end_where += " where end >= {}".format(start_ts)
+    #     if start_ts and end_ts:
+    #         sql_start_end_where += " and"
+    #     if end_ts:
+    #         sql_start_end_where += " where start <= {}", format(end_ts)
+
+    #     def _start_end_posedge(table):
+    #         return "select start as ts, 1 as edge, * from {}{}".format(table, sql_start_end_where)
+
+    #     def _start_end_negedge(table):
+    #         return "select end as ts, 0 as edge, * from {}{}".format(table, sql_start_end_where)
+
+    #     posedge_func = _start_end_posedge
+    #     negedge_func = _start_end_negedge
+    #     subquery = "("
+    #     subquery += "\n" + posedge_func(table)
+    #     subquery += "\n" + "UNION ALL"
+    #     subquery += "\n" + negedge_func(table)
+    #     subquery += "\n)"
+    #     sql = Select(table_or_subquery=subquery, ordering_terms=["ts"])
+    #     return sql
 
     def edges(self, table, start_ts=None, end_ts=None):
         sql = self._edges_sql(table, start_ts, end_ts)
@@ -235,18 +355,18 @@ where
         sql.result_columns = ["Count(*)"]
         return self.execute(sql).fetchone()[0]
 
-    def _ranges_by_name_query(self, range_names):
-        """return sql select statement that produces results with (name, start, end) for any range with range_names in the name"""
-        assert len(range_names) > 0
-        sql = """select 
-  CUPTI_ACTIVITY_KIND_RANGE.*
-from  
-  CUPTI_ACTIVITY_KIND_RANGE
-  INNER JOIN StringTable on CUPTI_ACTIVITY_KIND_RANGE.name = StringTable._id_
-  where StringTable.value like '%{}%'""".format(range_names[0])
-        for name in range_names[1:]:
-            sql += "\n  or StringTable.value like '%{}%'".format(name)
-        return sql
+#     def _ranges_by_name_query(self, range_names):
+#         """return sql select statement that produces results with (name, start, end) for any range with range_names in the name"""
+#         assert len(range_names) > 0
+#         sql = """select
+#   CUPTI_ACTIVITY_KIND_RANGE.*
+# from
+#   CUPTI_ACTIVITY_KIND_RANGE
+#   INNER JOIN StringTable on CUPTI_ACTIVITY_KIND_RANGE.name = StringTable._id_
+#   where StringTable.value like '%{}%'""".format(range_names[0])
+#         for name in range_names[1:]:
+#             sql += "\n  or StringTable.value like '%{}%'".format(name)
+#         return sql
 
     def multi_edges(self, table_names, start_ts=None, end_ts=None):
         edges = {}
@@ -282,19 +402,47 @@ from
             next_edges[yield_table] = edges[yield_table].fetchone()
             yield yield_table, yield_edge
 
-    def multi_edges_records(self, table_names, start_ts=None, end_ts=None):
+    def multi_ordered_edges_records(self, edge_tables, row_factories={}):
+        for table, edge in self.multi_ordered_edges(edge_tables):
+            yield edge[0], edge[1], row_factories[table](edge[2:])
 
-        strings, _ = self.get_strings()
+    def multi_ordered_edges(self, edge_tables):
 
-        for table, edge in self.multi_edges(table_names, start_ts=start_ts, end_ts=end_ts):
-            if table == "CUPTI_ACTIVITY_KIND_RUNTIME":
-                yield edge[0], edge[1], Runtime.from_nvprof_row(edge[2:])
-            elif table == "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL":
-                yield edge[0], edge[1], ConcurrentKernel.from_nvprof_row(edge[2:], strings)
-            elif table == "CUPTI_ACTIVITY_KIND_MEMCPY":
-                yield edge[0], edge[1], Memcpy.from_nvprof_row(edge[2:])
-            elif table == "CUPTI_ACTIVITY_KIND_RANGES":
-                yield edge[0], edge[1], Range.from_nvprof_row(edge[2:], strings)
+        edges = {}
+        next_edges = {}
+        for table in edge_tables:
+            edges[table] = self.ordered_edges(table)
+            next_edges[table] = edges[table].fetchone()
+
+        while True:
+            # clean up any tables that have no more rows
+            to_remove = []
+            for table, edge in next_edges.items():
+                if edge is None:
+                    to_remove += [table]
+            for table in to_remove:
+                logger.debug("no more rows in {}".format(table))
+                del(edges[table])
+                del(next_edges[table])
+
+            yield_edge = None
+            yield_table = None
+            for table, edge in next_edges.items():
+                if not yield_table:
+                    yield_edge = edge
+                    yield_table = table
+                else:
+                    if edge[0] < yield_edge[0]:
+                        yield_edge = edge
+                        yield_table = table
+            if not yield_table:
+                break
+
+            next_edges[yield_table] = edges[yield_table].fetchone()
+            yield yield_table, yield_edge
+
+    def ordered_edges(self, edge_table):
+        return self.execute('SELECT * FROM {} ORDER BY ts'.format(edge_table))
 
 
 class MultiTableRows(object):
