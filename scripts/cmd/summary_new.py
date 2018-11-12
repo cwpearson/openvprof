@@ -102,12 +102,32 @@ def summary_new(ctx, filename, begin, end, range, first_ranges):
         pids.add(row[0])
     logger.debug("{} distinct process IDs".format(len(pids)))
 
-    logger.debug('determining time-spans during marker ranges')
+    selected_timeslices = 0.0
     if range:
-        ranges_view = db.ranges_with_name(range)
+        ranges_view = db.ranges_with_name(range, first_n=first_ranges)
         num_ranges = db.execute(
             'SELECT Count(*) from {}'.format(ranges_view)).fetchone()[0]
         logger.debug("{} ranges match the names {}".format(num_ranges, range))
+
+        # figure out how much of the time is spent during the selected ranges
+        range_edges = db.edges_from_rows(ranges_view)
+        num_overlapped = 0
+        in_range = None
+        for row in db.ordered_edges(range_edges):
+            ts = row[0]
+            is_posedge = row[1]
+            row = row[2:]
+            if is_posedge:
+                num_overlapped += 1
+            else:
+                num_overlapped -= 1
+            if num_overlapped == 1:
+                in_range = ts
+            elif num_overlapped == 0:
+                selected_timeslices += ts - in_range
+                in_range = None
+    logger.debug("Selected timeslices cover {}s".format(
+        selected_timeslices/1e9))
 
     tables = [
         'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL',
@@ -263,6 +283,8 @@ def summary_new(ctx, filename, begin, end, range, first_ranges):
 
     # print("Records cover: {}s".format(
     #     (last_record_end - first_record_start) / 1e9))
+
+    print("Selected timeslices cover {}s".format(selected_timeslices/1e9))
 
     print("Marker Report")
     print("=============")
