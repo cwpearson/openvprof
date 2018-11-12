@@ -42,8 +42,9 @@ class Heap(object):
 @click.argument('filename')
 @click.option('-b', '--begin', help='Only consider events that begin after this time')
 @click.option('-e', '--end', help='Only consider records that end before this time')
+@click.option('-r', '--range', multiple=True, help='Only consider records that occur during marker ranges with this in the name')
 @click.pass_context
-def summary_new(ctx, filename, begin, end):
+def summary_new(ctx, filename, begin, end, range):
 
     db = Db(filename)
 
@@ -98,12 +99,27 @@ def summary_new(ctx, filename, begin, end):
         pids.add(row[0])
     logger.debug("{} distinct process IDs".format(len(pids)))
 
+    logger.debug('determining time-spans during marker ranges')
+    if range:
+        select = db._ranges_by_name_query(range)
+        num_ranges = db.execute(
+            'SELECT Count(*) from (\n{}\n)'.format(select)).fetchone()[0]
+        logger.debug("{} ranges match the names {}".format(num_ranges, range))
+
     tables = [
         'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL',
         'CUPTI_ACTIVITY_KIND_MEMCPY',
         'CUPTI_ACTIVITY_KIND_KERNEL',
         'CUPTI_ACTIVITY_KIND_RUNTIME',
     ]
+
+    if range:
+        for table in tables:
+            sql = db._rows_by_range_name(table, range)
+            num_rows = db.execute(
+                'SELECT Count(*) from (\n{}\n)'.format(sql)).fetchone()[0]
+            logger.debug("{} rows in {} fall within ranges {}".format(
+                num_rows, table, range))
 
     total_rows = 0
     for table in tables:

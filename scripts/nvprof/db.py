@@ -183,6 +183,24 @@ WITH rows AS (
                     logger.error("unhandled table {}".format(table))
                     raise SystemExit(-1)
 
+    def _rows_by_range_name(self, table, range_names):
+        """sql to select rows from table where row.start and row.end fall within a range that has a name like range_names"""
+
+        matching_ranges_query = self._ranges_by_name_query(range_names)
+
+        sql = """select
+  {0}.*
+from
+  {0}
+JOIN
+(
+{1}
+) as CUPTI_ACTIVITY_KIND_RANGE
+where
+  {0}.start BETWEEN CUPTI_ACTIVITY_KIND_RANGE.start and CUPTI_ACTIVITY_KIND_RANGE.end
+  and {0}.end BETWEEN CUPTI_ACTIVITY_KIND_RANGE.start and CUPTI_ACTIVITY_KIND_RANGE.end""".format(table, matching_ranges_query)
+        return sql
+
     def _edges_sql(self, table, start_ts=None, end_ts=None):
         sql_start_end_where = ""
         if start_ts:
@@ -216,6 +234,19 @@ WITH rows AS (
         sql = self._edges_sql(table, start_ts, end_ts)
         sql.result_columns = ["Count(*)"]
         return self.execute(sql).fetchone()[0]
+
+    def _ranges_by_name_query(self, range_names):
+        """return sql select statement that produces results with (name, start, end) for any range with range_names in the name"""
+        assert len(range_names) > 0
+        sql = """select 
+  CUPTI_ACTIVITY_KIND_RANGE.*
+from  
+  CUPTI_ACTIVITY_KIND_RANGE
+  INNER JOIN StringTable on CUPTI_ACTIVITY_KIND_RANGE.name = StringTable._id_
+  where StringTable.value like '%{}%'""".format(range_names[0])
+        for name in range_names[1:]:
+            sql += "\n  or StringTable.value like '%{}%'".format(name)
+        return sql
 
     def multi_edges(self, table_names, start_ts=None, end_ts=None):
         edges = {}
