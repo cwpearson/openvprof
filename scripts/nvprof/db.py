@@ -141,6 +141,9 @@ WITH rows AS (
         logger.debug("executing SQL: {}".format(cmd))
         return self.conn.execute(cmd).fetchone()[0]
 
+    def num_edges(self, table_name, ranges=None):
+        """return the number of edges contained within [r] for r in ranges"""
+
     def get_devices(self):
         # look for unique devices in CUPTI_ACTIVITY_KIND_DEVICE
         devices = []
@@ -180,8 +183,7 @@ WITH rows AS (
                     logger.error("unhandled table {}".format(table))
                     raise SystemExit(-1)
 
-    def edges(self, table, start_ts=None, end_ts=None):
-
+    def _edges_sql(self, table, start_ts=None, end_ts=None):
         sql_start_end_where = ""
         if start_ts:
             sql_start_end_where += " where end >= {}".format(start_ts)
@@ -198,12 +200,22 @@ WITH rows AS (
 
         posedge_func = _start_end_posedge
         negedge_func = _start_end_negedge
-        sql = "select * from ("
-        sql += "\n" + posedge_func(table)
-        sql += "\n" + "UNION ALL"
-        sql += "\n" + negedge_func(table)
-        sql += "\n) order by ts"
+        subquery = "("
+        subquery += "\n" + posedge_func(table)
+        subquery += "\n" + "UNION ALL"
+        subquery += "\n" + negedge_func(table)
+        subquery += "\n)"
+        sql = Select(table_or_subquery=subquery, ordering_terms=["ts"])
+        return sql
+
+    def edges(self, table, start_ts=None, end_ts=None):
+        sql = self._edges_sql(table, start_ts, end_ts)
         return self.execute(sql)
+
+    def num_edges(self, table, start_ts=None, end_ts=None):
+        sql = self._edges_sql(table, start_ts, end_ts)
+        sql.result_columns = ["Count(*)"]
+        return self.execute(sql).fetchone()[0]
 
     def multi_edges(self, table_names, start_ts=None, end_ts=None):
         edges = {}

@@ -88,16 +88,15 @@ def summary_new(ctx, filename, begin, end):
     tids = set()
     for row in db.execute("SELECT distinct threadId from CUPTI_ACTIVITY_KIND_RUNTIME"):
         tid = row[0]
-        print(tid)
         if tid < 0:
             tid += 2**32
             assert tid >= 0
         tids.add(tid)
-    logger.debug("{} thread IDs".format(len(tids)))
+    logger.debug("{} distinct thread IDs".format(len(tids)))
     pids = set()
     for row in db.execute("SELECT distinct processId from CUPTI_ACTIVITY_KIND_RUNTIME"):
         pids.add(row[0])
-    logger.debug("{} process IDs".format(len(pids)))
+    logger.debug("{} distinct process IDs".format(len(pids)))
 
     tables = [
         'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL',
@@ -108,8 +107,10 @@ def summary_new(ctx, filename, begin, end):
 
     total_rows = 0
     for table in tables:
-        total_rows += db.num_rows(table, ranges=[[begin, end]])
-    logger.debug("{} rows".format(total_rows))
+        table_rows = db.num_edges(table, begin, end)
+        logger.debug("table {} has {} edges".format(table, table_rows))
+        total_rows += table_rows
+    logger.debug("{} edges".format(total_rows))
 
     START = 'op_start'
     STOP = 'op_stop'
@@ -140,21 +141,23 @@ def summary_new(ctx, filename, begin, end):
         operator.or_, runtimes.values(), timeline.NeverActive())
 
     exposed_gpu = any_gpu_kernel & (~ (any_comm | any_runtime))
+    any_gpu_kernel.record_key = lambda r: (r.device_id, r.name)
+    exposed_gpu.record_key = lambda r: (r.device_id, r.name)
     exposed_comm = any_comm & (~ (any_gpu_kernel | any_runtime))
     exposed_runtime_mask = ~ (any_gpu_kernel | any_comm)
     exposed_runtime = any_runtime & exposed_runtime_mask
     exposed_runtime.record_key = lambda r: (r.pid, r.tid, r.name())
     any_runtime.record_key = lambda r: (r.pid, r.tid, r.name())
 
-    any_runtime.verbose = True
+    # any_runtime.verbose = True
     any_runtime.name = "any_runtime"
-    any_gpu_kernel.verbose = True
+    # any_gpu_kernel.verbose = True
     any_gpu_kernel.name = "any_gpu_kernel"
     # any_comm.verbose = True
     any_comm.name = "any_comm"
-    exposed_runtime.verbose = True
+    # exposed_runtime.verbose = True
     exposed_runtime.name = "exposed_runtime"
-    exposed_runtime_mask.verbose = True
+    # exposed_runtime_mask.verbose = True
     exposed_runtime_mask.name = "exposed_runtime_mask"
 
     rows_read = 0
@@ -164,7 +167,8 @@ def summary_new(ctx, filename, begin, end):
         rows_read += 1
         if rows_read % 15000 == 0:
             elapsed = time.time() - loop_wall_start
-            logger.debug("{} rows/sec".format(rows_read / elapsed))
+            logger.debug("{} rows/sec, {}/{} ({}%)".format(rows_read /
+                                                           elapsed, rows_read, total_rows, rows_read/total_rows * 100))
 
         assert timestamp
         assert record
@@ -204,14 +208,18 @@ def summary_new(ctx, filename, begin, end):
             elif isinstance(record, nvprof.record.Comm):
                 exposed_communication.start_record_if_active(
                     timestamp, record)
-            elif isinstance(record, nvprof.record.Marker):
-                pass
         else:
             if isinstance(record, nvprof.record.Runtime):
                 any_runtime.end_record(timestamp, record)
                 exposed_runtime.end_record(timestamp, record)
             elif isinstance(record, nvprof.record.Comm):
                 exposed_communication.end_record(timestamp, record)
+
+        if isinstance(record, nvprof.record.ConcurrentKernel):
+            if is_posedge:
+                any_gpu_kernel.start_record_if_active(timestamp, record)
+            else:
+                any_gpu_kernel.end_record(timestamp, record)
 
     # print("Records cover: {}s".format(
     #     (last_record_end - first_record_start) / 1e9))
@@ -272,5 +280,21 @@ def summary_new(ctx, filename, begin, end):
     print("=============")
     print("Total Exposed GPU Kernel Time: {}s".format(exposed_gpu.time/1e9))
     print("Any Kernel Active: {}s".format(any_gpu_kernel.time/1e9))
+
+    print("Active kernel time-slices by GPU")
+    print("--------------------------------")
     for gpu, t in gpu_kernels.items():
         print("GPU {} Kernel Time: {}s".format(gpu, t.time/1e9))
+
+    gpu_kernel_names = defaultdict(
+        lambda: defaultdict(lambda: 0.0))  # [gpu][name] = 0.0
+    for r, elapsed in any_gpu_kernel.record_times.items():
+        gpu_kernel_names[r[0]][r[1]] += elapsed
+
+    for gpu, d in gpu_kernel_names.items():
+        print("Active kernel time-slices on GPU {}".format(gpu))
+        print("-----------------------------------")
+        kernel_times = sorted(list(d.items()),
+                              key=lambda t: t[1], reverse=True)
+        for name, elapsed in kernel_times:
+            print("  {} {}s".format(name, elapsed/1e9))
