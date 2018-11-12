@@ -403,8 +403,11 @@ select {1}.end as ts, 0 as edge, * from {1}""".format(out_view, view)
             yield yield_table, yield_edge
 
     def multi_ordered_edges_records(self, edge_tables, row_factories={}):
+
+        strings, _ = self.get_strings()
+
         for table, edge in self.multi_ordered_edges(edge_tables):
-            yield edge[0], edge[1], row_factories[table](edge[2:])
+            yield edge[0], edge[1], row_factories[table](edge[2:], strings)
 
     def multi_ordered_edges(self, edge_tables):
 

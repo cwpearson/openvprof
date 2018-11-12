@@ -45,7 +45,7 @@ RUNTIME_CBID_NAME = {
 class Runtime(namedtuple('Runtime', ['cbid', 'start', 'end', 'pid', 'tid', 'correlation_id', 'return_value'])):
     __slots__ = ()
 
-    def from_nvprof_row(row):
+    def from_nvprof_row(row, strings):
         tid = row[5]
         if tid < 0:
             tid += 2**32
@@ -77,7 +77,7 @@ class ConcurrentKernel(namedtuple('ConcurrentKernel', ['start', 'end', 'complete
 class Memcpy(namedtuple('Memcpy', ['copy_kind', 'src_kind', 'dst_kind', 'bytes', 'start', 'end', 'device_id'])):
     __slots__ = ()
 
-    def from_nvprof_row(row):
+    def from_nvprof_row(row, strings):
         return Memcpy(*row[1:4], *row[5:9])
 
 

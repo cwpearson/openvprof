@@ -185,7 +185,7 @@ def summary_new(ctx, filename, begin, end, range):
     # exposed_runtime_mask.verbose = True
     exposed_runtime_mask.name = "exposed_runtime_mask"
 
-    rows_read = 0
+    edges_read = 0
     loop_wall_start = time.time()
     # for a particular table, how to create a row
     row_factories = {}
@@ -200,11 +200,11 @@ def summary_new(ctx, filename, begin, end, range):
             row_factories[edges] = nvprof.record.Range.from_nvprof_row
     for timestamp, is_posedge, record in db.multi_ordered_edges_records(filtered_edges.values(), row_factories=row_factories):
 
-        rows_read += 1
-        if rows_read % 15000 == 0:
+        edges_read += 1
+        if edges_read % 15000 == 0:
             elapsed = time.time() - loop_wall_start
-            logger.debug("{} rows/sec, {}/{} ({}%)".format(rows_read /
-                                                           elapsed, rows_read, total_rows, rows_read/total_rows * 100))
+            logger.debug("{} rows/sec, {}/{} ({}%)".format(edges_read /
+                                                           elapsed, edges_read, total_edges, edges_read/total_edges * 100))
 
         assert timestamp
         assert record
