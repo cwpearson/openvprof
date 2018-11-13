@@ -1,4 +1,5 @@
 from collections import namedtuple, defaultdict
+from cupti import activity_memcpy_kind
 
 
 class Device(object):
@@ -74,11 +75,46 @@ class ConcurrentKernel(namedtuple('ConcurrentKernel', ['start', 'end', 'complete
         return ConcurrentKernel(*row[6:10], strings[row[24]])
 
 
-class Memcpy(namedtuple('Memcpy', ['copy_kind', 'src_kind', 'dst_kind', 'bytes', 'start', 'end', 'device_id'])):
+class Comm(namedtuple('Comm', [
+    'copy_kind',
+    'src_kind',
+    'dst_kind',
+    'bytes',
+    'start',
+    'end',
+    'src_id',
+    'dst_id',
+    'address',
+    'pid',
+])):
     __slots__ = ()
 
-    def from_nvprof_row(row, strings):
-        return Memcpy(*row[1:4], *row[5:9])
+    def from_nvprof_memcpy_row(row, strings):
+        copy_kind = row[1]
+        device_id = row[8]
+        if copy_kind == activity_memcpy_kind.HTOD or copy_kind == activity_memcpy_kind.HTOA:
+            src_id = -1
+            dst_id = device_id
+        elif copy_kind == activity_memcpy_kind.DTOH or copy_kind == activity_memcpy_kind.ATOH:
+            src_id = device_id
+            dst_id = -1
+        elif copy_kind == activity_memcpy_kind.HTOH:
+            src_id = -1
+            dst_id = -1
+        elif DTOD or PTOP:
+            src_id = device_id
+            dst_id = device_id
+        else:
+            logger.error("Unhandled copy_kind {}".format(copy_kind))
+            raise ValueError
+
+        return Comm('memcpy', *row[2:4], *row[5:8], src_id, dst_id, 0, 0)
+
+    def from_nvprof_memcpy2_row(row, strings):
+        pass
+
+    def from_nvprof_unifiend_memory_counter_row(row, strings):
+        pass
 
 
 class Marker(namedtuple('Marker', ['timestamp', 'id_', 'name'])):
@@ -396,7 +432,3 @@ typedef enum CUpti_runtime_api_trace_cbid_enum {
 } CUpti_runtime_api_trace_cbid;
 
 """
-
-
-class Comm(object):
-    pass

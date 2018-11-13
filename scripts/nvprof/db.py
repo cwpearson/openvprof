@@ -2,7 +2,7 @@
 
 import sqlite3
 import logging
-from nvprof.record import Device, Runtime, ConcurrentKernel, Memcpy, Range
+from nvprof.record import Device, Runtime, ConcurrentKernel, Comm, Range
 from nvprof.sql import Select
 import copy
 import sys

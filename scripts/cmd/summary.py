@@ -198,7 +198,7 @@ def summary(ctx, filename, begin, end, range, first_ranges):
         if table == 'CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL':
             row_factories[edges] = nvprof.record.ConcurrentKernel.from_nvprof_row
         elif table == 'CUPTI_ACTIVITY_KIND_MEMCPY':
-            row_factories[edges] = nvprof.record.Memcpy.from_nvprof_row
+            row_factories[edges] = nvprof.record.Comm.from_nvprof_memcpy_row
         elif table == 'CUPTI_ACTIVITY_KIND_RUNTIME':
             row_factories[edges] = nvprof.record.Runtime.from_nvprof_row
         elif table == 'CUPTI_ACTIVITY_KIND_RANGE':
@@ -228,15 +228,15 @@ def summary(ctx, filename, begin, end, range, first_ranges):
                 gpu_kernels[record.device_id].set_active(timestamp)
             else:
                 gpu_kernels[record.device_id].set_idle(timestamp)
-        elif isinstance(record, nvprof.record.Memcpy):
-            if record.src_kind == cupti.activity_memory_kind.DEVICE:
-                src_tag = 'gpu' + str(record.device_id)
-            else:
+        elif isinstance(record, nvprof.record.Comm):
+            if record.src_id == -1:
                 src_tag = 'cpu'
-            if record.dst_kind == cupti.activity_memory_kind.DEVICE:
-                dst_tag = 'gpu' + str(record.device_id)
             else:
+                src_tag = 'gpu' + str(record.src_id)
+            if record.dst_id == -1:
                 dst_tag = 'cpu'
+            else:
+                dst_tag = 'gpu' + str(record.dst_id)
             comm_id = src_tag + "-" + dst_tag
             if is_posedge:
                 comms[comm_id].set_active(timestamp)
@@ -244,14 +244,6 @@ def summary(ctx, filename, begin, end, range, first_ranges):
                 comms[comm_id].set_idle(timestamp)
 
         # Track records by various activity masks
-
-        if is_posedge:
-            if isinstance(record, nvprof.record.Comm):
-                exposed_communication.start_record(
-                    timestamp, record)
-        else:
-            if isinstance(record, nvprof.record.Comm):
-                exposed_communication.end_record(timestamp, record)
 
         if isinstance(record, nvprof.record.Runtime):
             if is_posedge:
@@ -261,12 +253,17 @@ def summary(ctx, filename, begin, end, range, first_ranges):
             else:
                 any_runtime.end_record(timestamp, record)
                 exposed_runtime.end_record(timestamp, record)
-
         elif isinstance(record, nvprof.record.ConcurrentKernel):
             if is_posedge:
                 any_gpu_kernel.start_record(timestamp, record)
             else:
                 any_gpu_kernel.end_record(timestamp, record)
+        elif isinstance(record, nvprof.record.Comm):
+            if is_posedge:
+                exposed_comm.start_record(
+                    timestamp, record)
+            else:
+                exposed_comm.end_record(timestamp, record)
 
     print("Selected timeslices cover {}s".format(selected_timeslices/1e9))
 
@@ -286,8 +283,9 @@ def summary(ctx, filename, begin, end, range, first_ranges):
 
     print("Exposed communication breakdown")
     print("-------------------------------")
-    print("<not implemented>")
-    print("")
+    # for tag, t in exposed_comm.record_times.items():
+    #     print("  {}s".format(tag))
+    # print("")
 
     print("Runtime Report")
     print("==============")
