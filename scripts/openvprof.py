@@ -10,10 +10,11 @@ import time
 
 import cmd.summary
 import cmd.list_ranges
-import cmd.summary_new
+import cmd.stats
 import cmd.filter
 import cmd.list_records
 import cmd.list_edges
+import cmd.list_ranges
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,8 @@ def spark(x, log=False):
 @click.option('--debug', is_flag=True, help="print debugging messages")
 @click.pass_context
 def cli(ctx, debug):
-    logging.basicConfig()
+    logging.basicConfig(format='%(asctime)s,%(msecs)03d - [%(filename)s:%(lineno)s] - %(levelname)s: %(message)s',
+                        datefmt='%Y-%b-%d %H:%M:%S')
     ctx.ensure_object(dict)
     ctx.obj["DEBUG"] = debug
     if debug:
@@ -223,8 +225,8 @@ def timeline(filename, _from, to):
 cli.add_command(timeline)
 cli.add_command(driver_time)
 cli.add_command(kernel_time)
+cli.add_command(cmd.stats.stats)
 cli.add_command(cmd.summary.summary)
-cli.add_command(cmd.summary_new.summary_new)
 cli.add_command(cmd.list_ranges.list_ranges)
 cli.add_command(cmd.list_records.list_records)
 cli.add_command(cmd.filter.filter)

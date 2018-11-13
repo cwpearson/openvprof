@@ -68,9 +68,10 @@ WITH rows AS (
     def _get_version(self):
         return self.conn.execute(str(Select("Version"))).fetchone()[0]
 
-    def get_first_start(self):
-        """return the first timestamp found in a variety of tables"""
+    def get_extent(self):
+        """return (first, last) timestamp"""
         first = float('Inf')
+        last = -1
 
         start_end_tables = [
             "CUPTI_ACTIVITY_KIND_RUNTIME",
@@ -81,14 +82,22 @@ WITH rows AS (
             "CUPTI_ACTIVITY_KIND_KERNEL",
             'CUPTI_ACTIVITY_KIND_RANGE',
         ]
+        timestamp_tables = [
+            'CUPTI_ACTIVITY_KIND_MARKER'
+        ]
 
-        for t in start_end_tables:
-            sql = Select(t)
-            sql.ResultColumn(expr="Min(start)")
-            result = self.execute(sql).fetchone()[0]
-            if result:
-                first = min(first, result)
-        return first
+        sql = ""
+        for i, t in enumerate(start_end_tables):
+            if i > 0:
+                sql += "UNION ALL "
+            sql += 'SELECT Min(start), Max(end) FROM {}\n'.format(t)
+        for t in timestamp_tables:
+            sql += "UNION ALL SELECT Min(timestamp), Max(timestamp) FROM {}\n".format(t)
+        row = self.execute(sql).fetchone()
+        if row:
+            return row
+        else:
+            return (None, None)
 
     def _range_filter_string(ranges):
         if not ranges:

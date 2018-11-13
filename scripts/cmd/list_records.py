@@ -20,7 +20,7 @@ def list_records(ctx, filename, relative):
     ]
 
     if relative:
-        timestamp_offset = db.get_first_start()
+        timestamp_offset, _ = db.get_extent()
     else:
         timestamp_offset = 0
 
