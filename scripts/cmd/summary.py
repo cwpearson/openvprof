@@ -185,7 +185,7 @@ def summary(ctx, filename, begin, end, range, first_ranges):
     any_gpu_kernel.name = "any_gpu_kernel"
     # any_comm.verbose = True
     any_comm.name = "any_comm"
-    # exposed_runtime.verbose = True
+    exposed_runtime.verbose = True
     exposed_runtime.name = "exposed_runtime"
     # exposed_runtime_mask.verbose = True
     exposed_runtime_mask.name = "exposed_runtime_mask"
@@ -218,8 +218,10 @@ def summary(ctx, filename, begin, end, range, first_ranges):
         # Update active masks
         if isinstance(record, nvprof.record.Runtime):
             if is_posedge:
+                # print("posedge", record, "@", timestamp)
                 runtimes[record.tid].set_active(timestamp)
             else:
+                # print("negedge", record, "@", timestamp)
                 runtimes[record.tid].set_idle(timestamp)
         elif isinstance(record, nvprof.record.ConcurrentKernel):
             if is_posedge:
@@ -245,7 +247,7 @@ def summary(ctx, filename, begin, end, range, first_ranges):
 
         if is_posedge:
             if isinstance(record, nvprof.record.Comm):
-                exposed_communication.start_record_if_active(
+                exposed_communication.start_record(
                     timestamp, record)
         else:
             if isinstance(record, nvprof.record.Comm):
@@ -254,15 +256,15 @@ def summary(ctx, filename, begin, end, range, first_ranges):
         if isinstance(record, nvprof.record.Runtime):
             if is_posedge:
                 assert any_runtime.evaluate()
-                any_runtime.start_record_if_active(timestamp, record)
-                exposed_runtime.start_record_if_active(timestamp, record)
+                any_runtime.start_record(timestamp, record)
+                exposed_runtime.start_record(timestamp, record)
             else:
                 any_runtime.end_record(timestamp, record)
                 exposed_runtime.end_record(timestamp, record)
 
         elif isinstance(record, nvprof.record.ConcurrentKernel):
             if is_posedge:
-                any_gpu_kernel.start_record_if_active(timestamp, record)
+                any_gpu_kernel.start_record(timestamp, record)
             else:
                 any_gpu_kernel.end_record(timestamp, record)
 

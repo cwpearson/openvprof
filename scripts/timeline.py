@@ -18,7 +18,9 @@ class Expr(object):
         self.rhs = rhs
         self.time = 0.0  # amount of time this has been active
         self.activated_at = None  # when this timeline last became busy, or None if idle
+        # the start time of all records when they became active
         self.record_starts = {}
+        # accumulated time of all records, past and present
         self.record_times = defaultdict(lambda: 0.0)
         if op == Operator.INV:
             assert self.lhs is None
@@ -51,24 +53,38 @@ class Expr(object):
     def and_eval_func(self):
         return self.lhs.evaluate() and self.rhs.evaluate()
 
-    def start_record_if_active(self, ts, record):
+    def start_record(self, ts, record):
+        key = self.record_key(record)
+        assert key not in self.record_starts
         if self.evaluate():
-            key = self.record_key(record)
-            if key in self.record_starts:
-                print(record, "already marked as started")
-            assert key not in self.record_starts
-            self.record_starts[key] = ts
+            self.record_starts[key] = ts  # if we're active, track the time
+        else:
+            # next time we become active, we'll start tracking the time
+            self.record_starts[key] = None
 
     def end_record(self, ts, record):
         key = self.record_key(record)
         if key in self.record_starts:  # may have already ended this record if it was the cause of the Expr going inactive
-            self.record_times[key] += ts - self.record_starts[key]
+            # may have already paused this record
+            if self.record_starts[key] is not None:
+                self.record_times[key] += ts - self.record_starts[key]
             del self.record_starts[key]
 
-    def end_all_records(self, ts):
+    def pause_all_records(self, ts):
+        """ accumulate time for all records we are tracking"""
         for key in list(self.record_starts.keys()):
+            # self.print("pausing", key, "@", ts)
             self.record_times[key] += ts - self.record_starts[key]
-            del self.record_starts[key]
+            self.record_starts[key] = None
+
+    def resume_all_records(self, ts):
+        """ resume tracking time for all records we are tracking"""
+        # when we go active, b
+        for key in list(self.record_starts.keys()):
+            # self.print("resuming", key, "@", ts)
+            # one of these records may have made us go active, so it won't be none
+            if self.record_starts[key] is None:
+                self.record_starts[key] = ts
 
     def evaluate(self):
         """we should have already been updated by our children if they changed"""
@@ -89,15 +105,16 @@ class Expr(object):
         # if I change, then we need to have our parents update as well
         changed = False
         if not self.evaluate() and new_val:  # inactive to active
-            # self.print("idle -> busy")
+            # self.print("idle -> active @", ts)
             self.activated_at = ts
+            self.resume_all_records(ts)
             changed = True
 
         elif self.evaluate() and not new_val:  # active to inactive
-            # self.print("busy -> idle")
+            # self.print("active -> idle @", ts)
             self.time += ts - self.activated_at
             self.activated_at = None
-            self.end_all_records(ts)
+            self.pause_all_records(ts)
             changed = True
 
         # inform parents if I have changed
