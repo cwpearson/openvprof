@@ -2,6 +2,7 @@ import click
 import logging
 from nvprof.db import Db
 from datetime import datetime
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def list_ranges(ctx, filename, group, sort):
 
     ordered_output = []
     if group:
-        print("count\ttot(s)\tmin(s)\tmax(s)\tavg(s)\tname")
+        print("count\ttot(s)\tmin(s)\tmax(s)\tavg(s)\tstddev(s)\tname")
         for key in groups:
             g = groups[key]
             mi = g[0][1] - g[0][0]
@@ -46,7 +47,16 @@ def list_ranges(ctx, filename, group, sort):
                 ma = max(e[1] - e[0], ma)
                 tot += e[1] - e[0]
             avg = tot / len(g)
-            ordered_output += [(len(g), tot/1e9, mi/1e9, ma/1e9, avg/1e9, key)]
+            va = (g[0][1] - g[0][0] - avg) ** 2
+            for e in g[1:]:
+                va += (e[1] - e[0] - avg) ** 2
+            if len(g) == 1:
+                va = 0
+            else:
+                va /= (len(g) - 1)
+            stddev = math.sqrt(va)
+            ordered_output += [(len(g), tot/1e9, mi/1e9,
+                                ma/1e9, avg/1e9, stddev/1e9, key)]
 
         sort_by = {
             'count': 0,
@@ -54,6 +64,7 @@ def list_ranges(ctx, filename, group, sort):
             'min': 2,
             'max': 3,
             'avg': 4,
+            'stddev': 5,
         }
 
         ordered_output = sorted(
