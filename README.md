@@ -2,36 +2,18 @@
 
 A collection of profiling tools, inspired by challenges in profiling large CUDA applications using `nvprof` and `nvvp`.
 
-## scripts/pynvtx.py
+## scripts/openvprof.py
 
-A python wrapper for adding Nvidia Tools Extension ranges for python functions to `nvprof` profiles.
+A trace analysis tool that can report _exposed_ GPU activities - GPU activites that actually contribute to the overall program execution time.
 
-### Run Natively
+## openvprof
 
-`nvprof pynvtx.py <your python script and args>`
-
-### Add to a Docker image
-
-```docker
-RUN mkdir /opt/openvprof
-ADD https://raw.githubusercontent.com/cwpearson/openvprof/master/scripts/pynvtx.py /opt/openvprof/pynvtx.py
-RUN chmod +x /opt/openvprof/pynvtx.py
-ENV PATH /opt/openvprof:$PATH
-```
+An open CUDA GPU profiler using CuPTI and Nvidia Management Library.
 
 ### Build/Run a docker image
 
 docker build -f ppc64le.Dockerfile -t openvprof/ppc64le .
 docker run -v `pwd`/container:/host -it openvprof/ppc64le
-
-#### Options
-
-`--depth DEPTH`: only record ranges to this stack dept
-`--verbose` / `--debug` print verbose information / print debug messages
-
-## openvprof
-
-An open profiler using CuPTI and Nvidia Management Library
 
 ### Building
 
