@@ -182,3 +182,6 @@ Visualizing:
 - [ ] physical link traffic visualization
 - [ ] Split or combine different transfer directions on same link
 
+## Acknowledgements
+
+These tools were conceived and partially prototyped at IBM's T.J. Watson Research Center during a fall 2018 internship
