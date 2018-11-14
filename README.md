@@ -9,6 +9,25 @@ A trace analysis tool that can report _exposed_ GPU activities - GPU activites t
 ### example
 
 ```
+$ ./openvprof.py --helpUsage: openvprof.py [OPTIONS] COMMAND [ARGS]...
+
+Options:
+  --debug  print debugging messages
+  --help   Show this message and exit.
+
+Commands:
+  driver-time   Show a histogram of driver API times
+  filter        filter file INPUT to contain only records between START and...
+  kernel-time   Show a histogram of kernel times (ns)
+  list-edges
+  list-ranges   print summary statistics of ranges
+  list-records
+  stats
+  summary
+  timeline      Generate a chrome:://tracing timeline
+```
+
+```
 $ ./openvprof.py summary -r CUDATreeLearner::Train  ~/ibmGBT_data/timeline.nvprof
 Selected timeslices cover 19.952495698s
 Marker Report
