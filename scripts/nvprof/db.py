@@ -86,13 +86,14 @@ WITH rows AS (
             'CUPTI_ACTIVITY_KIND_MARKER'
         ]
 
-        sql = ""
+        sql = "SELECT Min(start), Max(end) FROM ("
         for i, t in enumerate(start_end_tables):
             if i > 0:
                 sql += "UNION ALL "
-            sql += 'SELECT Min(start), Max(end) FROM {}\n'.format(t)
+            sql += 'SELECT start, end FROM {}\n'.format(t)
         for t in timestamp_tables:
-            sql += "UNION ALL SELECT Min(timestamp), Max(timestamp) FROM {}\n".format(t)
+            sql += "UNION ALL SELECT timestamp, timestamp FROM {}\n".format(t)
+        sql += ")"
         row = self.execute(sql).fetchone()
         if row:
             return row

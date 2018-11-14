@@ -302,6 +302,15 @@ def summary(ctx, filename, begin, end, range, first_ranges):
     for name, elapsed in thread_times:
         print("  {} {}s".format(name, elapsed/1e9))
 
+    print("Any Runtime by Call")
+    print("-----------------------")
+    call_times = defaultdict(lambda: 0.0)
+    for record, elapsed in any_runtime.record_times.items():
+        call_times[record[2]] += elapsed
+    call_times = sorted(call_times.items(), key=lambda t: t[1], reverse=True)
+    for name, elapsed in call_times:
+        print("  {} {}s".format(name, elapsed/1e9))
+
     print("Exposed Runtime by Call")
     print("-----------------------")
     call_times = defaultdict(lambda: 0.0)
