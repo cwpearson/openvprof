@@ -145,50 +145,64 @@ def summary(ctx, filename, begin, end, range, first_ranges):
 
     logger.debug("{} edges".format(total_edges))
 
-    gpu_kernels = {}
-    runtimes = {}
-    comms = {}
+    gpu_kernel_masks = {}
+    runtime_masks = {}
+    comm_masks = {}
     for d in devices:
-        gpu_kernels[d.id_] = timeline.Timeline()
-        comms["cpu-gpu" + str(d.id_)] = timeline.Timeline()
-        comms["gpu" + str(d.id_) + "-cpu"] = timeline.Timeline()
+        gpu_kernel_masks[d.id_] = timeline.Timeline()
+        comm_masks["cpu-gpu" + str(d.id_)] = timeline.Timeline()
+        comm_masks["gpu" + str(d.id_) + "-cpu"] = timeline.Timeline()
 
         for d1 in devices:
-            comms["gpu" + str(d.id_) + "-gpu" + str(d1.id_)
-                  ] = timeline.Timeline()
+            comm_masks["gpu" + str(d.id_) + "-gpu" + str(d1.id_)
+                       ] = timeline.Timeline()
 
     for p in pids:
         for t in tids:
-            runtimes[t] = timeline.Timeline()
+            runtime_masks[t] = timeline.Timeline()
 
-    any_gpu_kernel = reduce(
-        operator.or_, gpu_kernels.values(), timeline.NeverActive())
+    # define combined activity masks
+    any_gpu_kernel_mask = reduce(
+        operator.or_, gpu_kernel_masks.values(), timeline.NeverActive())
 
-    any_comm = reduce(
-        operator.or_, comms.values(), timeline.NeverActive())
+    any_comm_mask = reduce(
+        operator.or_, comm_masks.values(), timeline.NeverActive())
 
-    any_runtime = reduce(
-        operator.or_, runtimes.values(), timeline.NeverActive())
+    any_runtime_mask = reduce(
+        operator.or_, runtime_masks.values(), timeline.NeverActive())
 
-    exposed_gpu = any_gpu_kernel & (~ (any_comm | any_runtime))
-    any_gpu_kernel.record_key = lambda r: (r.device_id, r.name)
-    exposed_gpu.record_key = lambda r: (r.device_id, r.name)
-    exposed_comm = any_comm & (~ (any_gpu_kernel | any_runtime))
-    exposed_runtime_mask = ~ (any_gpu_kernel | any_comm)
-    exposed_runtime = any_runtime & exposed_runtime_mask
-    exposed_runtime.record_key = lambda r: (r.pid, r.tid, r.name())
-    any_runtime.record_key = lambda r: (r.pid, r.tid, r.name())
+    exposed_gpu_kernel_mask = any_gpu_kernel_mask & (
+        ~ (any_comm_mask | any_runtime_mask))
 
-    # any_runtime.verbose = True
-    any_runtime.name = "any_runtime"
-    # any_gpu_kernel.verbose = True
-    any_gpu_kernel.name = "any_gpu_kernel"
-    # any_comm.verbose = True
-    any_comm.name = "any_comm"
-    exposed_runtime.verbose = True
-    exposed_runtime.name = "exposed_runtime"
-    # exposed_runtime_mask.verbose = True
-    exposed_runtime_mask.name = "exposed_runtime_mask"
+    exposed_comm_mask = any_comm_mask & (
+        ~ (any_gpu_kernel_mask | any_runtime_mask))
+    exposed_runtime_mask = any_runtime_mask & ~ (
+        any_gpu_kernel_mask | any_comm_mask)
+
+    # define record trackers
+    any_gpu_kernel_records = timeline.Records(
+        mask=any_gpu_kernel_mask,
+        key_func=lambda r: (r.device_id, r.name),
+    )
+
+    exposed_gpu_kernel_records = timeline.Records(
+        mask=exposed_gpu_kernel_mask,
+        key_func=lambda r: (r.device_id, r.name),
+    )
+
+    exposed_runtime_records = timeline.Records(
+        mask=exposed_runtime_mask,
+        key_func=lambda r: (r.pid, r.tid, r.name()),
+    )
+
+    any_runtime_records = timeline.Records(
+        mask=any_runtime_mask,
+        key_func=lambda r: (r.pid, r.tid, r.name()),
+    )
+
+    exposed_comm_records = timeline.Records(
+        mask=exposed_comm_mask,
+    )
 
     edges_read = 0
     loop_wall_start = time.time()
@@ -217,17 +231,31 @@ def summary(ctx, filename, begin, end, range, first_ranges):
 
         # Update active masks
         if isinstance(record, nvprof.record.Runtime):
+            # ignore cudaEventSynchonize, cudaDeviceSynchronize, and cudaStreamSynchronize
+            # by definition, these functions block while waiting for the other kinds of activity
+
+            if record.name() == "cudaEventSynchronize":
+                continue
+            elif record.name() == "cudaStreamSynchronize":
+                continue
+            elif record.name() == "cudaDeviceSynchronize":
+                continue
+
             if is_posedge:
-                # print("posedge", record, "@", timestamp)
-                runtimes[record.tid].set_active(timestamp)
+                runtime_masks[record.tid].set_active(timestamp)
+                any_runtime_records.start_record(timestamp, record)
+                exposed_runtime_records.start_record(timestamp, record)
             else:
-                # print("negedge", record, "@", timestamp)
-                runtimes[record.tid].set_idle(timestamp)
+                runtime_masks[record.tid].set_idle(timestamp)
+                any_runtime_records.end_record(timestamp, record)
+                exposed_runtime_records.end_record(timestamp, record)
         elif isinstance(record, nvprof.record.ConcurrentKernel):
             if is_posedge:
-                gpu_kernels[record.device_id].set_active(timestamp)
+                gpu_kernel_masks[record.device_id].set_active(timestamp)
+                any_gpu_kernel_records.start_record(timestamp, record)
             else:
-                gpu_kernels[record.device_id].set_idle(timestamp)
+                gpu_kernel_masks[record.device_id].set_idle(timestamp)
+                any_gpu_kernel_records.end_record(timestamp, record)
         elif isinstance(record, nvprof.record.Comm):
             if record.src_id == -1:
                 src_tag = 'cpu'
@@ -239,31 +267,12 @@ def summary(ctx, filename, begin, end, range, first_ranges):
                 dst_tag = 'gpu' + str(record.dst_id)
             comm_id = src_tag + "-" + dst_tag
             if is_posedge:
-                comms[comm_id].set_active(timestamp)
-            else:
-                comms[comm_id].set_idle(timestamp)
-
-        # Track records by various activity masks
-
-        if isinstance(record, nvprof.record.Runtime):
-            if is_posedge:
-                assert any_runtime.evaluate()
-                any_runtime.start_record(timestamp, record)
-                exposed_runtime.start_record(timestamp, record)
-            else:
-                any_runtime.end_record(timestamp, record)
-                exposed_runtime.end_record(timestamp, record)
-        elif isinstance(record, nvprof.record.ConcurrentKernel):
-            if is_posedge:
-                any_gpu_kernel.start_record(timestamp, record)
-            else:
-                any_gpu_kernel.end_record(timestamp, record)
-        elif isinstance(record, nvprof.record.Comm):
-            if is_posedge:
-                exposed_comm.start_record(
+                comm_masks[comm_id].set_active(timestamp)
+                exposed_comm_records.start_record(
                     timestamp, record)
             else:
-                exposed_comm.end_record(timestamp, record)
+                comm_masks[comm_id].set_idle(timestamp)
+                exposed_comm_records.end_record(timestamp, record)
 
     print("Selected timeslices cover {}s".format(selected_timeslices/1e9))
 
@@ -274,11 +283,11 @@ def summary(ctx, filename, begin, end, range, first_ranges):
 
     print("Communication Report")
     print("====================")
-    print("Active communication Time-Slices: {}s".format(any_comm.time/1e9))
-    print("Exposed communication Time-Slices: {}s".format(exposed_comm.time/1e9))
+    print("Active communication Time-Slices: {}s".format(any_comm_mask.time/1e9))
+    print("Exposed communication Time-Slices: {}s".format(exposed_comm_mask.time/1e9))
     print("Active Communication Time-Slices")
     print("--------------------------------")
-    for tag, t in comms.items():
+    for tag, t in comm_masks.items():
         print("  {} {}s".format(tag, t.time/1e9))
 
     print("Exposed communication breakdown")
@@ -289,13 +298,13 @@ def summary(ctx, filename, begin, end, range, first_ranges):
 
     print("Runtime Report")
     print("==============")
-    print("Any CUDA Runtime Time-Slices: {}s".format(any_runtime.time/1e9))
-    print("Exposed CUDA Runtime Time-Slices: {}s".format(exposed_runtime.time/1e9))
+    print("Any CUDA Runtime Time-Slices: {}s".format(any_runtime_mask.time/1e9))
+    print("Exposed CUDA Runtime Time-Slices: {}s".format(exposed_runtime_mask.time/1e9))
 
     print("Exposed Runtime by Thread")
     print("-------------------------")
     thread_times = defaultdict(lambda: 0.0)
-    for record, elapsed in exposed_runtime.record_times.items():
+    for record, elapsed in exposed_runtime_records.record_times.items():
         thread_times[record[1]] += elapsed
     thread_times = sorted(thread_times.items(),
                           key=lambda t: t[1], reverse=True)
@@ -305,7 +314,7 @@ def summary(ctx, filename, begin, end, range, first_ranges):
     print("Any Runtime by Call")
     print("-----------------------")
     call_times = defaultdict(lambda: 0.0)
-    for record, elapsed in any_runtime.record_times.items():
+    for record, elapsed in any_runtime_records.record_times.items():
         call_times[record[2]] += elapsed
     call_times = sorted(call_times.items(), key=lambda t: t[1], reverse=True)
     for name, elapsed in call_times:
@@ -314,7 +323,7 @@ def summary(ctx, filename, begin, end, range, first_ranges):
     print("Exposed Runtime by Call")
     print("-----------------------")
     call_times = defaultdict(lambda: 0.0)
-    for record, elapsed in exposed_runtime.record_times.items():
+    for record, elapsed in exposed_runtime_records.record_times.items():
         call_times[record[2]] += elapsed
     call_times = sorted(call_times.items(), key=lambda t: t[1], reverse=True)
     for name, elapsed in call_times:
@@ -323,30 +332,30 @@ def summary(ctx, filename, begin, end, range, first_ranges):
     print("Exposed Runtime Breakdown")
     print("-------------------------")
     runtime_times = sorted(
-        list(exposed_runtime.record_times.items()), key=lambda t: t[1], reverse=True)
+        list(exposed_runtime_records.record_times.items()), key=lambda t: t[1], reverse=True)
     for record, elapsed in runtime_times:
         print("  {} {}s".format(str(record), elapsed / 1e9))
 
     print("Any Runtime Breakdown")
     print("---------------------")
     runtime_times = sorted(
-        list(any_runtime.record_times.items()), key=lambda t: t[1], reverse=True)
+        list(any_runtime_records.record_times.items()), key=lambda t: t[1], reverse=True)
     for record, elapsed in runtime_times:
         print("  {} {}s".format(str(record), elapsed / 1e9))
 
     print("Kernel Report")
     print("=============")
-    print("Any GPU Kernel Time-Slices: {}s".format(any_gpu_kernel.time/1e9))
-    print("Exposed GPU Kernel Time-Slices: {}s".format(exposed_gpu.time/1e9))
+    print("Any GPU Kernel Time-Slices: {}s".format(any_gpu_kernel_mask.time/1e9))
+    print("Exposed GPU Kernel Time-Slices: {}s".format(exposed_gpu_kernel_mask.time/1e9))
 
     print("Active kernel time-slices by GPU")
     print("--------------------------------")
-    for gpu, t in gpu_kernels.items():
+    for gpu, t in gpu_kernel_masks.items():
         print("  GPU {} Kernel Time: {}s".format(gpu, t.time/1e9))
 
     gpu_kernel_names = defaultdict(
         lambda: defaultdict(lambda: 0.0))  # [gpu][name] = 0.0
-    for r, elapsed in any_gpu_kernel.record_times.items():
+    for r, elapsed in any_gpu_kernel_records.record_times.items():
         gpu_kernel_names[r[0]][r[1]] += elapsed
 
     for gpu, d in gpu_kernel_names.items():
