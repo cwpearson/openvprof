@@ -96,6 +96,8 @@ def cli(ctx, debug):
     if debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    logger.info("command was {}".format(" ".join(sys.argv)))
+
 
 @click.command()
 @click.argument('filename')

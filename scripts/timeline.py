@@ -176,17 +176,21 @@ class Timeline(Expr):
         self.time = 0.0
         self.activated_at = None
         self.listeners = set()
+        self.stack = 0
 
     def set_idle(self, ts):
-        assert self.activated_at is not None
-        self.time += (ts - self.activated_at)
-        self.activated_at = None
-        self.notify_listeners(ts)
+        assert self.stack >= 0
+        self.stack -= 1
+        if self.stack == 0:
+            self.time += (ts - self.activated_at)
+            self.activated_at = None
+            self.notify_listeners(ts)
 
     def set_active(self, ts):
-        assert self.activated_at is None
-        self.activated_at = ts
-        self.notify_listeners(ts)
+        self.stack += 1
+        if self.stack == 1:
+            self.activated_at = ts
+            self.notify_listeners(ts)
 
     def __str__(self):
         return str(id(self))
