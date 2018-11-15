@@ -61,15 +61,15 @@ def summary(ctx, filename, begin, end, range, first_ranges):
         adjusted = ts - begin
         return adjusted
 
-    logger.debug("Loading devices")
+    logger.info("Loading devices")
     devices = db.get_devices()
-    logger.debug("{} devices".format(len(devices)))
+    logger.info("{} devices".format(len(devices)))
 
-    logger.debug("Loading strings")
+    logger.info("Loading strings")
     nvprof_id_to_string, nvprof_string_to_id = db.get_strings()
-    logger.debug("{} strings".format(len(nvprof_id_to_string)))
+    logger.info("{} strings".format(len(nvprof_id_to_string)))
 
-    logger.debug("Loading thread ids")
+    logger.info("Loading thread ids")
     tids = set()
     for row in db.execute("SELECT distinct threadId from CUPTI_ACTIVITY_KIND_RUNTIME"):
         tid = row[0]
@@ -77,18 +77,18 @@ def summary(ctx, filename, begin, end, range, first_ranges):
             tid += 2**32
             assert tid >= 0
         tids.add(tid)
-    logger.debug("{} distinct thread IDs".format(len(tids)))
+    logger.info("{} distinct thread IDs".format(len(tids)))
     pids = set()
     for row in db.execute("SELECT distinct processId from CUPTI_ACTIVITY_KIND_RUNTIME"):
         pids.add(row[0])
-    logger.debug("{} distinct process IDs".format(len(pids)))
+    logger.info("{} distinct process IDs".format(len(pids)))
 
     selected_timeslices = 0.0
     if range:
         ranges_view = db.ranges_with_name(range, first_n=first_ranges)
         num_ranges = db.execute(
             'SELECT Count(*) from {}'.format(ranges_view)).fetchone()[0]
-        logger.debug("{} ranges match the names {}".format(num_ranges, range))
+        logger.info("{} ranges match the names {}".format(num_ranges, range))
 
         # figure out how much of the time is spent during the selected ranges
         range_edges = db.edges_from_rows(ranges_view)
@@ -107,7 +107,7 @@ def summary(ctx, filename, begin, end, range, first_ranges):
             elif num_overlapped == 0:
                 selected_timeslices += ts - in_range
                 in_range = None
-    logger.debug("Selected timeslices cover {}s".format(
+    logger.info("Selected timeslices cover {}s".format(
         selected_timeslices/1e9))
 
     tables = [
@@ -228,6 +228,9 @@ def summary(ctx, filename, begin, end, range, first_ranges):
         assert timestamp
         assert record
         timestamp = normalize_to_nvprof(timestamp)
+
+        # FIXME: need to ignore the case when communication is overlapped with its corresponding runtime call
+        # could create some special runtime masks to handle communication activity
 
         # Update active masks
         if isinstance(record, nvprof.record.Runtime):

@@ -92,6 +92,7 @@ def cli(ctx, debug):
                         datefmt='%Y-%b-%d %H:%M:%S')
     ctx.ensure_object(dict)
     ctx.obj["DEBUG"] = debug
+    logging.getLogger().setLevel(logging.INFO)
     if debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
