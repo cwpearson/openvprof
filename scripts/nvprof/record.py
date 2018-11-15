@@ -10,7 +10,10 @@ class Device(object):
 RUNTIME_CBID_NAME = {
     3: "cudaGetDeviceCount",
     4: "cudaGetDeviceProperties",
+    8: "cudaConfigureCall",
+    9: "cudaSetupArgument",
     10: "cudaGetLastError",
+    13: "cudaLaunch",
     16: "cudaSetDevice",
     17: "cudaGetDevice",
     20: "cudaMalloc",
@@ -101,7 +104,7 @@ class Comm(namedtuple('Comm', [
         elif copy_kind == activity_memcpy_kind.HTOH:
             src_id = -1
             dst_id = -1
-        elif DTOD or PTOP:
+        elif copy_kind == activity_memcpy_kind.DTOD or copy_kind == activity_memcpy_kind.PTOP:
             src_id = device_id
             dst_id = device_id
         else:
@@ -111,10 +114,10 @@ class Comm(namedtuple('Comm', [
         return Comm('memcpy', *row[2:4], *row[5:8], src_id, dst_id, 0, 0)
 
     def from_nvprof_memcpy2_row(row, strings):
-        pass
+        raise NotImplementedError
 
     def from_nvprof_unifiend_memory_counter_row(row, strings):
-        pass
+        raise NotImplementedError
 
 
 class Marker(namedtuple('Marker', ['timestamp', 'id_', 'name'])):
