@@ -15,6 +15,7 @@ import cmd.filter
 import cmd.list_records
 import cmd.list_edges
 import cmd.list_ranges
+import cmd.timeline
 
 logger = logging.getLogger(__name__)
 
@@ -171,61 +172,6 @@ def kernel_time(ctx, filename, scale):
     print("Durations: 2^{} {} 2^{}".format(lower, sparkstring, upper))
 
 
-@click.command()
-@click.argument('filename')
-@click.option('--to')
-@click.option('--from', '_from')
-def timeline(filename, _from, to):
-    """Generate a chrome:://tracing timeline"""
-
-    conn = sqlite3.connect(filename)
-    c = conn.cursor()
-
-    if to:
-        try:
-            to = float(to)
-        except ValueError:
-            print("to should be a float", file=sys.stderr)
-            sys.exit(-1)
-
-    if _from:
-        try:
-            _from = float(_from)
-        except ValueError:
-            print("from should be a float", file=sys.stderr)
-            sys.exit(-1)
-
-    trace = {
-        "traceEvents": [],
-        "displayTimeUnit": "ns",
-    }
-
-    # add KERNELS to timeline
-    for row in c.execute("SELECT * FROM CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL"):
-        start_ns = row[6]
-        end_ns = row[7]
-        if _from and start_ns < _from:
-            continue
-        if to and end_ns > to:
-            continue
-        j = {
-            "name": "name",
-            "cat": "cat",
-            "ph": "X",
-            "pid": "CONCURRENT_KERNEL",
-            "tid": "tid",
-            "ts": start_ns // 1000,
-            "dur": (end_ns - start_ns) // 1000,
-            "args": {},
-            # "tdur": dur,
-        }
-        trace["traceEvents"] += [j]
-
-    s = json.dumps(trace, indent=4)
-    print(s)
-
-
-cli.add_command(timeline)
 cli.add_command(driver_time)
 cli.add_command(kernel_time)
 cli.add_command(cmd.stats.stats)
@@ -234,6 +180,7 @@ cli.add_command(cmd.list_ranges.list_ranges)
 cli.add_command(cmd.list_records.list_records)
 cli.add_command(cmd.filter.filter)
 cli.add_command(cmd.list_edges.list_edges)
+cli.add_command(cmd.timeline.timeline)
 
 if __name__ == '__main__':
     cli()

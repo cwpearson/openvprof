@@ -28,7 +28,7 @@ class Records(object):
 
     def start_record(self, ts, record):
         key = self.key_func(record)
-        assert key not in self.record_starts
+        # assert key not in self.record_starts
         if self.active:
             self.record_starts[key] = ts  # if we're active, track the time
         else:
